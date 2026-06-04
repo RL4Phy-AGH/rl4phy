@@ -6,7 +6,7 @@
 /gps/pos/centre 0 0 -50 cm
 /gps/direction 0 0 1
 
-/vis/open OGL 800x800-0+0
+/vis/open
 /vis/drawVolume
 /vis/viewer/set/viewpointThetaPhi 70 20
 /vis/viewer/zoom 1.5
