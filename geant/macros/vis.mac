@@ -1,0 +1,19 @@
+# Interactive 3D view (Geant4 OpenGL): the geometry plus the muon's track.
+# Use:  rl4phy-geant.exe [--gdml <file>] --vis [<this file>]
+/gps/particle mu-
+/gps/energy 160 GeV
+/gps/pos/type Point
+/gps/pos/centre 0 0 -50 cm
+/gps/direction 0 0 1
+
+/vis/open OGL 800x800-0+0
+/vis/drawVolume
+/vis/viewer/set/viewpointThetaPhi 70 20
+/vis/viewer/zoom 1.5
+/vis/scene/add/axes 0 0 0 10 cm
+/vis/scene/add/trajectories smooth
+/vis/scene/endOfEventAction accumulate
+/vis/modeling/trajectories/create/drawByParticleID
+/vis/modeling/trajectories/drawByParticleID-0/set mu- red
+
+/run/beamOn 1
