@@ -7,8 +7,11 @@
 #include "G4VisAttributes.hh"
 #include "G4Colour.hh"
 #include "G4SystemOfUnits.hh"
-#include "G4GDMLParser.hh"
 #include <iostream>
+
+#ifdef RL4PHY_ENABLE_GDML
+#include "G4GDMLParser.hh"
+#endif
 
 DetectorConstruction::DetectorConstruction(std::string gdmlFile)
     : fGdmlFile(std::move(gdmlFile)) {}
@@ -59,6 +62,7 @@ G4VPhysicalVolume* DetectorConstruction::BuildMUonE() {
 }
 
 G4VPhysicalVolume* DetectorConstruction::BuildFromGDML() {
+#ifdef RL4PHY_ENABLE_GDML
   G4GDMLParser parser;
   parser.Read(fGdmlFile, false);  // false = skip schema validation (offline)
   G4VPhysicalVolume* world = parser.GetWorldVolume();
@@ -67,4 +71,9 @@ G4VPhysicalVolume* DetectorConstruction::BuildFromGDML() {
             << " daughters=" << world->GetLogicalVolume()->GetNoDaughters()
             << std::endl;
   return world;
+#else
+  std::cerr << "GDML support is not available in this build."
+            << " Using the in-code geometry instead." << std::endl;
+  return BuildMUonE();
+#endif
 }

@@ -1,0 +1,37 @@
+FROM ubuntu:22.04
+
+ENV DEBIAN_FRONTEND=noninteractive
+
+RUN apt-get update && apt-get install -y \
+    build-essential cmake curl git wget \
+    libexpat1-dev libxerces-c-dev \
+    libgl1-mesa-dev libglu1-mesa-dev \
+    libx11-dev libxext-dev libxmu-dev libxi-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /tmp
+RUN wget -q https://github.com/Geant4/geant4/archive/refs/tags/v11.3.2.tar.gz && \
+    tar -xzf v11.3.2.tar.gz && \
+    cmake -S /tmp/geant4-11.3.2 -B /tmp/geant4-build \
+    -DCMAKE_INSTALL_PREFIX=/opt/geant4 \
+    -DGEANT4_INSTALL_DATA=OFF \
+    -DGEANT4_BUILD_MULTITHREADED=ON \
+    -DGEANT4_USE_GDML=ON \
+    -DGEANT4_USE_OPENGL_X11=ON \
+    -DGEANT4_USE_QT=OFF \
+    -DCMAKE_BUILD_TYPE=Release && \
+    cmake --build /tmp/geant4-build --parallel $(nproc) && \
+    cmake --install /tmp/geant4-build && \
+    rm -rf /tmp/geant4-11.3.2 /tmp/geant4-build /tmp/v11.3.2.tar.gz
+
+RUN mkdir -p /opt/geant4/share/Geant4 && \
+    ln -sfn /data /opt/geant4/share/Geant4/data
+
+ENV Geant4_DIR=/opt/geant4/lib/cmake/Geant4
+ENV LD_LIBRARY_PATH=/opt/geant4/lib:${LD_LIBRARY_PATH}
+ENV PATH=/opt/geant4/bin:${PATH}
+ENV G4LEDATA=/data/G4EMLOW8.8
+ENV G4NEUTRONHPDATA=/data/G4NDL4.7.1
+ENV G4ENSDFSTATEDATA=/data/G4ENSDFSTATE3.0
+ENV G4LEVELGAMMADATA=/data/PhotonEvaporation6.1.2
+ENV G4PARTICLEXSDATA=/data/G4PARTICLEXS4.2
