@@ -2,12 +2,15 @@
 #include "G4UImanager.hh"
 #include "G4UIExecutive.hh"
 #include "G4VisExecutive.hh"
-#include "G4GDMLParser.hh"
 #include "FTFP_BERT.hh"
 #include "DetectorConstruction.hh"
 #include "ActionInitialization.hh"
 #include <iostream>
 #include <string>
+
+#ifdef RL4PHY_ENABLE_GDML
+#include "G4GDMLParser.hh"
+#endif
 
 // The G4 side: build the detector, optionally dump it to GDML, then run a beam
 // or open a viewer.
@@ -36,6 +39,7 @@ int main(int argc, char** argv) {
   runManager->SetUserInitialization(new ActionInitialization());
   runManager->Initialize();
 
+#ifdef RL4PHY_ENABLE_GDML
   if (!exportGdml.empty()) {
     G4GDMLParser parser;
     // false keeps the names clean (Station1, ...); otherwise Geant4 tacks a
@@ -43,6 +47,12 @@ int main(int argc, char** argv) {
     parser.Write(exportGdml, detector->GetWorldPV(), false);
     std::cout << "GDML EXPORTED: " << exportGdml << std::endl;
   }
+#else
+  if (!gdmlFile.empty() || !exportGdml.empty()) {
+    std::cerr << "GDML support is not available in this build."
+              << " Falling back to the in-code geometry." << std::endl;
+  }
+#endif
 
   auto* uiMgr = G4UImanager::GetUIpointer();
   if (useVis) {
