@@ -1,12 +1,13 @@
 cmake_minimum_required(VERSION 3.16...3.30)
 project(rl4phy_geant LANGUAGES CXX)
 
-find_package(Geant4 REQUIRED ui_all vis_all)
+# gdml is a required component here: it is how we hand the geometry over to the
+# Python side, so a build without it is no use to us. Asking Geant4 for the
+# component (rather than test-compiling the header) also brings Xerces-C into the
+# link, and it does not get fooled the way a header probe does when the linker
+# cannot see Xerces yet.
+find_package(Geant4 REQUIRED ui_all vis_all gdml)
 include(${Geant4_USE_FILE})
-
-include(CheckIncludeFileCXX)
-set(CMAKE_REQUIRED_INCLUDES ${Geant4_INCLUDE_DIRS})
-check_include_file_cxx(G4GDMLParser.hh RL4PHY_HAS_G4GDMLPARSER)
 
 file(GLOB sources ${PROJECT_SOURCE_DIR}/src/*.cc)
 add_executable(rl4phy-geant ${sources})
@@ -14,7 +15,7 @@ target_include_directories(rl4phy-geant PRIVATE ${PROJECT_SOURCE_DIR}/src)
 target_link_libraries(rl4phy-geant PRIVATE ${Geant4_LIBRARIES})
 set_property(TARGET rl4phy-geant PROPERTY CXX_STANDARD 17)
 
-if(RL4PHY_HAS_G4GDMLPARSER)
+if(Geant4_gdml_FOUND)
   target_compile_definitions(rl4phy-geant PRIVATE RL4PHY_ENABLE_GDML)
 endif()
 
