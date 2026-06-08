@@ -12,8 +12,8 @@
 #include "G4GDMLParser.hh"
 #endif
 
-// The G4 side: build the detector, optionally dump it to GDML, then run a beam
-// or open a viewer.
+// The Geant4 side: build the detector, optionally dump it to GDML, then run a
+// beam or open a viewer.
 //   --gdml <file>          load geometry from GDML instead of building it in code
 //   --export-gdml <file>   write the geometry out to GDML (for the Python side)
 //   --vis [macro]          open the OpenGL viewer (default macros/vis.mac)

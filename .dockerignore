@@ -2,7 +2,7 @@
 # A build/ produced outside Docker (for example a Windows MSVC build) carries a
 # CMakeCache pointing at host paths, and the in-container cmake refuses to reuse
 # it, so the image build fails. The *.gdml files are run outputs, not sources.
-geant/build/
+geant4/**/build/
 **/*.gdml
 
 # the repo history does not belong in the image context either
