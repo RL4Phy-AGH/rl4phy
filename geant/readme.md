@@ -40,6 +40,15 @@ build\Release\rl4phy-geant.exe macros\run.mac
 build\Release\rl4phy-geant.exe --gdml muone.gdml macros\run.mac
 ```
 
+### Datasets
+
+Both commands above need the Geant4 data files present, not only the beam run:
+`--export-gdml` also calls `Initialize()`, which builds the physics tables and
+reads the nuclear and cross-section data. Locally they come with the Geant4
+install (the `GEANT4_INSTALL_DATA=ON` build), so it just works. The container
+image ships without data, so you mount them at `/data` (see the Dockerfile), and
+the dataset versions have to match the ones Geant4 11.3 expects.
+
 ### Verification
 
 To sanity-check, run the binary: `--export-gdml` produces a GDML with the 3
