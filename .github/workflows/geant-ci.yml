@@ -1,0 +1,98 @@
+name: geant-ci
+
+on:
+  pull_request:
+    paths:
+      - 'geant/**'
+      - 'Dockerfile'
+      - '.github/workflows/geant-ci.yml'
+  push:
+    branches: [main]
+    paths:
+      - 'geant/**'
+      - 'Dockerfile'
+
+concurrency:
+  group: geant-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build geant app image
+        uses: docker/build-push-action@v7
+        with:
+          context: .
+          file: ./Dockerfile
+          load: true
+          push: false
+          tags: rl4phy-geant:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      # The image keeps the data out of its layers and reads it from /data, so the
+      # smoke test has to supply the datasets. These are the same versions the
+      # image's G4*DATA env vars expect (see issue #1). G4NDL is skipped because
+      # FTFP_BERT does not use the high-precision neutron data.
+      - name: Cache Geant4 datasets
+        id: g4data
+        uses: actions/cache@v4
+        with:
+          path: g4data
+          key: g4data-rl4phy-v1
+
+      - name: Download datasets (cache miss only)
+        if: steps.g4data.outputs.cache-hit != 'true'
+        run: |
+          set -euo pipefail
+          mkdir -p g4data && cd g4data
+          base=https://geant4-data.web.cern.ch/geant4-data/datasets
+          for tar in \
+            G4ENSDFSTATE.3.0 \
+            G4EMLOW.8.8 \
+            G4PARTICLEXS.4.2 \
+            G4PhotonEvaporation.6.1.2 ; do
+            echo "downloading $tar"
+            curl -fsSL "$base/$tar.tar.gz" | tar xz
+          done
+          ls -1
+
+      - name: Smoke test - GDML export
+        run: |
+          set -euo pipefail
+          mkdir -p out
+          docker run --rm \
+            -v "$PWD/g4data:/data" \
+            -v "$PWD/out:/out" \
+            rl4phy-geant:ci --export-gdml /out/muone.gdml | tee export.log
+          grep -q 'GDML EXPORTED' export.log
+          if grep -qi 'not available' export.log; then
+            echo "::error::GDML support is compiled out of the image"; exit 1
+          fi
+          test -s out/muone.gdml
+          grep -q 'name="Station1"' out/muone.gdml
+          grep -q '<box' out/muone.gdml
+
+      - name: Smoke test - beam run produces STEP records
+        run: |
+          set -euo pipefail
+          docker run --rm -v "$PWD/g4data:/data" \
+            rl4phy-geant:ci macros/run.mac | tee beam.log
+          grep -q '^STEP ' beam.log
+
+      - name: Upload outputs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: geant-ci-output
+          path: |
+            out/muone.gdml
+            export.log
+            beam.log
+          if-no-files-found: ignore
