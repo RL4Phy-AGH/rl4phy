@@ -3,13 +3,13 @@ name: geant-ci
 on:
   pull_request:
     paths:
-      - 'geant/**'
+      - 'geant4/**'
       - 'Dockerfile'
       - '.github/workflows/geant-ci.yml'
   push:
     branches: [main]
     paths:
-      - 'geant/**'
+      - 'geant4/**'
       - 'Dockerfile'
 
 concurrency:

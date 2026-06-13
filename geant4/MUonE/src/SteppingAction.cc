@@ -4,23 +4,27 @@
 #include "G4Track.hh"
 #include "G4VProcess.hh"
 #include "G4VPhysicalVolume.hh"
+#include "G4LogicalVolume.hh"
+#include "G4LogicalVolumeStore.hh"
 #include "G4ParticleDefinition.hh"
 #include "G4Event.hh"
 #include "G4EventManager.hh"
 #include "G4SystemOfUnits.hh"
 #include <iostream>
 
-// One line per step. We read it at the pre-step point (where the track is when
-// the step begins) plus whatever process ended the step. Position, momentum and
-// energy are all Python needs to line its own track up against ours; the
-// scattering angles fall straight out of the momentum, so we don't log them
-// separately. Stdout for now, gRPC later. Column order lives in RunAction.
+// One STEP line per step, but only inside the stations: Air and World steps are
+// not detector data. Read at the pre-step point; column order lives in RunAction.
 void SteppingAction::UserSteppingAction(const G4Step* step) {
-  const G4Track* track = step->GetTrack();
-  const G4StepPoint* pre = step->GetPreStepPoint();
-  const G4VPhysicalVolume* vol = pre->GetPhysicalVolume();
-  const G4VProcess* proc = step->GetPostStepPoint()->GetProcessDefinedStep();
+  if (!fStationLV) {
+    fStationLV = G4LogicalVolumeStore::GetInstance()->GetVolume("Station");
+  }
 
+  const G4StepPoint* pre = step->GetPreStepPoint();
+  const G4VPhysicalVolume* vol = pre->GetTouchableHandle()->GetVolume();
+  if (!vol || vol->GetLogicalVolume() != fStationLV) return;
+
+  const G4Track* track = step->GetTrack();
+  const G4VProcess* proc = step->GetPostStepPoint()->GetProcessDefinedStep();
   const auto pos = pre->GetPosition();
   const auto p = pre->GetMomentum();
   const int eventID =
@@ -37,6 +41,6 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
             << pre->GetKineticEnergy() / MeV << ' '
             << pre->GetGlobalTime() / ns << ' '
             << step->GetStepLength() / mm << ' '
-            << (vol ? vol->GetName() : "OutOfWorld") << ' '
+            << vol->GetName() << ' '
             << (proc ? proc->GetProcessName() : "initStep") << '\n';
 }
