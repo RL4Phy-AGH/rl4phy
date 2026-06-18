@@ -5,6 +5,8 @@
 #include "FTFP_BERT.hh"
 #include "DetectorConstruction.hh"
 #include "ActionInitialization.hh"
+#include "GrpcClient.hh"
+#include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <string>
 
@@ -21,22 +23,28 @@
 int main(int argc, char** argv) {
   std::cout << "RL4PHY-GEANT START" << std::endl;
 
-  std::string gdmlFile, macro, exportGdml;
+  std::string gdmlFile, macro, exportGdml, grpcHost;
   bool useVis = false;
   for (int i = 1; i < argc; ++i) {
     std::string a = argv[i];
     if (a == "--gdml" && i + 1 < argc) gdmlFile = argv[++i];
     else if (a == "--export-gdml" && i + 1 < argc) exportGdml = argv[++i];
+    else if (a == "--grpc-host" && i + 1 < argc) grpcHost = argv[++i];
     else if (a == "--vis") useVis = true;
     else macro = a;
   }
+
+  auto channel =
+      grpc::CreateChannel(grpcHost, grpc::InsecureChannelCredentials());
+  GrpcClient grpcClient(channel);
+  std::cout << "Geant4 client connected to " << grpcHost << std::endl;
 
   auto* runManager =
       G4RunManagerFactory::CreateRunManager(G4RunManagerType::Serial);
   auto* detector = new DetectorConstruction(gdmlFile);
   runManager->SetUserInitialization(detector);
   runManager->SetUserInitialization(new FTFP_BERT());
-  runManager->SetUserInitialization(new ActionInitialization());
+  runManager->SetUserInitialization(new ActionInitialization(&grpcClient));
   runManager->Initialize();
 
 #ifdef RL4PHY_ENABLE_GDML

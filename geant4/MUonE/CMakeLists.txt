@@ -9,10 +9,25 @@ project(rl4phy_geant LANGUAGES CXX)
 find_package(Geant4 REQUIRED ui_all vis_all gdml)
 include(${Geant4_USE_FILE})
 
+set(RL4PHY_GENERATED_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../../cpp_generated")
+set(RL4PHY_PROTO_SRCS
+    "${RL4PHY_GENERATED_DIR}/rl4phy.pb.cc"
+    "${RL4PHY_GENERATED_DIR}/rl4phy.grpc.pb.cc")
+
+find_package(Protobuf REQUIRED)
+find_library(GRPCPP_LIBRARY NAMES grpc++ REQUIRED)
+find_library(GRPC_LIBRARY NAMES grpc REQUIRED)
+find_library(GPR_LIBRARY NAMES gpr REQUIRED)
+
 file(GLOB sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc)
-add_executable(rl4phy-geant main.cc ${sources})
-target_include_directories(rl4phy-geant PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
-target_link_libraries(rl4phy-geant PRIVATE ${Geant4_LIBRARIES})
+add_executable(rl4phy-geant main.cc ${sources} ${RL4PHY_PROTO_SRCS})
+target_include_directories(rl4phy-geant PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${RL4PHY_GENERATED_DIR})
+target_link_libraries(rl4phy-geant PRIVATE
+    ${Geant4_LIBRARIES}
+    ${GRPCPP_LIBRARY} ${GRPC_LIBRARY} ${GPR_LIBRARY}
+    protobuf::libprotobuf)
 set_property(TARGET rl4phy-geant PROPERTY CXX_STANDARD 17)
 
 if(Geant4_gdml_FOUND)

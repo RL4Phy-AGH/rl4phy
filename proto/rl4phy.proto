@@ -1,0 +1,21 @@
+syntax = "proto3";
+
+package rl4phys;
+
+message Data
+{
+    float x = 1;
+    float y = 2;
+    float z = 3;
+    float px = 4;
+    float py = 5;
+    float pz = 6;
+    float energy = 7;
+}
+
+message Reply {}
+
+service SendService
+{
+    rpc SendData (Data) returns (Reply) {}
+}
