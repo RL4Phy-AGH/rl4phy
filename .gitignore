@@ -1,0 +1,5 @@
+cpp_generated/
+geant4/MUonE/build/
+python/rl4phy_pb2.py
+python/rl4phy_pb2_grpc.py
+python/__pycache__/

@@ -1,4 +1,7 @@
 #include "SteppingAction.hh"
+#ifdef RL4PHY_ENABLE_GRPC
+#include "GrpcClient.hh"
+#endif
 #include "G4Step.hh"
 #include "G4StepPoint.hh"
 #include "G4Track.hh"
@@ -11,6 +14,8 @@
 #include "G4EventManager.hh"
 #include "G4SystemOfUnits.hh"
 #include <iostream>
+
+SteppingAction::SteppingAction(GrpcClient* client) : fGrpcClient(client) {}
 
 // One STEP line per step, but only inside the stations: Air and World steps are
 // not detector data. Read at the pre-step point; column order lives in RunAction.
@@ -30,15 +35,32 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
   const int eventID =
       G4EventManager::GetEventManager()->GetConstCurrentEvent()->GetEventID();
 
+  const double x_mm = pos.x() / mm;
+  const double y_mm = pos.y() / mm;
+  const double z_mm = pos.z() / mm;
+  const double px_MeV = p.x() / MeV;
+  const double py_MeV = p.y() / MeV;
+  const double pz_MeV = p.z() / MeV;
+  const double e_kin_MeV = pre->GetKineticEnergy() / MeV;
+
+#ifdef RL4PHY_ENABLE_GRPC
+  if (fGrpcClient) {
+    fGrpcClient->SendStepData(
+        static_cast<float>(x_mm), static_cast<float>(y_mm), static_cast<float>(z_mm),
+        static_cast<float>(px_MeV), static_cast<float>(py_MeV), static_cast<float>(pz_MeV),
+        static_cast<float>(e_kin_MeV));
+  }
+#endif
+
   std::cout << "STEP "
             << eventID << ' '
             << track->GetTrackID() << ' '
             << track->GetParentID() << ' '
             << track->GetDefinition()->GetParticleName() << ' '
-            << pos.x() / mm << ' ' << pos.y() / mm << ' ' << pos.z() / mm << ' '
-            << p.x() / MeV << ' ' << p.y() / MeV << ' ' << p.z() / MeV << ' '
+            << x_mm << ' ' << y_mm << ' ' << z_mm << ' '
+            << px_MeV << ' ' << py_MeV << ' ' << pz_MeV << ' '
             << pre->GetTotalEnergy() / MeV << ' '
-            << pre->GetKineticEnergy() / MeV << ' '
+            << e_kin_MeV << ' '
             << pre->GetGlobalTime() / ns << ' '
             << step->GetStepLength() / mm << ' '
             << vol->GetName() << ' '

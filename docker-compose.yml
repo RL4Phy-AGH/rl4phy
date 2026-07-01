@@ -1,0 +1,14 @@
+services:
+  python:
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+    ports:
+      - "50051:50051"
+
+  geant:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    volumes:
+      - ./data:/data:ro
