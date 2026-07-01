@@ -5,13 +5,17 @@
 #include "FTFP_BERT.hh"
 #include "DetectorConstruction.hh"
 #include "ActionInitialization.hh"
-#include "GrpcClient.hh"
-#include <grpcpp/grpcpp.h>
 #include <iostream>
 #include <string>
 
 #ifdef RL4PHY_ENABLE_GDML
 #include "G4GDMLParser.hh"
+#endif
+
+#ifdef RL4PHY_ENABLE_GRPC
+#include "GrpcClient.hh"
+#include <grpcpp/grpcpp.h>
+#include <memory>
 #endif
 
 // The Geant4 side: build the detector, optionally dump it to GDML, then run a
@@ -34,17 +38,23 @@ int main(int argc, char** argv) {
     else macro = a;
   }
 
-  auto channel =
-      grpc::CreateChannel(grpcHost, grpc::InsecureChannelCredentials());
-  GrpcClient grpcClient(channel);
-  std::cout << "Geant4 client connected to " << grpcHost << std::endl;
+  GrpcClient* grpcClient = nullptr;
+#ifdef RL4PHY_ENABLE_GRPC
+  std::unique_ptr<GrpcClient> grpcClientOwner;
+  if (!grpcHost.empty()) {
+    grpcClientOwner = std::make_unique<GrpcClient>(
+        grpc::CreateChannel(grpcHost, grpc::InsecureChannelCredentials()));
+    grpcClient = grpcClientOwner.get();
+    std::cout << "Geant4 gRPC target: " << grpcHost << std::endl;
+  }
+#endif
 
   auto* runManager =
       G4RunManagerFactory::CreateRunManager(G4RunManagerType::Serial);
   auto* detector = new DetectorConstruction(gdmlFile);
   runManager->SetUserInitialization(detector);
   runManager->SetUserInitialization(new FTFP_BERT());
-  runManager->SetUserInitialization(new ActionInitialization(&grpcClient));
+  runManager->SetUserInitialization(new ActionInitialization(grpcClient));
   runManager->Initialize();
 
 #ifdef RL4PHY_ENABLE_GDML

@@ -1,5 +1,7 @@
 #include "SteppingAction.hh"
+#ifdef RL4PHY_ENABLE_GRPC
 #include "GrpcClient.hh"
+#endif
 #include "G4Step.hh"
 #include "G4StepPoint.hh"
 #include "G4Track.hh"
@@ -41,10 +43,14 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
   const double pz_MeV = p.z() / MeV;
   const double e_kin_MeV = pre->GetKineticEnergy() / MeV;
 
-  fGrpcClient->SendStepData(
-      static_cast<float>(x_mm), static_cast<float>(y_mm), static_cast<float>(z_mm),
-      static_cast<float>(px_MeV), static_cast<float>(py_MeV), static_cast<float>(pz_MeV),
-      static_cast<float>(e_kin_MeV));
+#ifdef RL4PHY_ENABLE_GRPC
+  if (fGrpcClient) {
+    fGrpcClient->SendStepData(
+        static_cast<float>(x_mm), static_cast<float>(y_mm), static_cast<float>(z_mm),
+        static_cast<float>(px_MeV), static_cast<float>(py_MeV), static_cast<float>(pz_MeV),
+        static_cast<float>(e_kin_MeV));
+  }
+#endif
 
   std::cout << "STEP "
             << eventID << ' '

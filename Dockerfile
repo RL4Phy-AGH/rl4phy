@@ -21,12 +21,6 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app/geant4/MUonE
 COPY proto/ /app/proto/
 COPY geant4/ /app/geant4/
-RUN mkdir -p /app/cpp_generated && \
-    protoc -I /app/proto \
-      --cpp_out=/app/cpp_generated \
-      --grpc_out=/app/cpp_generated \
-      --plugin=protoc-gen-grpc=/usr/bin/grpc_cpp_plugin \
-      /app/proto/rl4phy.proto
 RUN cmake -S /app/geant4/MUonE -B /app/geant4/MUonE/build \
     -DGeant4_DIR=/opt/geant4/lib/cmake/Geant4 \
     -DCMAKE_BUILD_TYPE=Release && \
