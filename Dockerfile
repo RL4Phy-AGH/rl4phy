@@ -34,7 +34,4 @@ RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 WORKDIR /work
 VOLUME ["/data", "/export"]
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
-# --export-gdml runs right after the detector is built (see main.cc), before
-# the beam macro, so python's GDML wait in server.py resolves as early as
-# possible.
-CMD ["--export-gdml", "/export/muone.gdml", "--grpc-host", "python:50051", "macros/run.mac"]
+CMD ["--grpc-host", "python:50051", "macros/run.mac"]

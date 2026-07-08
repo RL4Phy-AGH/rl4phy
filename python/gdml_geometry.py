@@ -1,23 +1,6 @@
-"""Minimal GDML geometry reader.
-
-Reads just enough of a GDML file to recover MUonE's station boxes and their
-placements: <box> solids and <physvol> placements directly under the world
-volume, which is all geant4/MUonE/src/DetectorConstruction.cc ever emits via
---export-gdml. This is deliberately not a general-purpose GDML library (that
-role belongs to pyg4ometry, which pulls in vtk/scipy/pandas/matplotlib for a
-~35 MB wheel) -- if the geometry grows solid types beyond boxes, extend this
-module rather than reaching for a heavyweight dependency just to read boxes.
-
-Rotation convention: GDML's <rotation x= y= z= unit="deg"/> lists angles that
-Geant4 (G4GDMLReadDefine::GetRotationMatrix) turns into a matrix by starting
-from identity and calling rotateX(x), then rotateY(y), then rotateZ(z) in
-that order, i.e. R = Rz(z) @ Ry(y) @ Rx(x) with each elementary rotation
-matrix left-multiplying the running product (see CLHEP's HepRotation::
-rotateX/Y/Z). We reproduce that composition exactly. Verified empirically by
-round-tripping MUonE's own geometry (Station2's rotateZ(30 deg) in
-DetectorConstruction.cc) through --export-gdml and back through --gdml: the
-reconstructed object-rotation matrix matched the original bit-for-bit.
-"""
+"""Rotation convention: GDML's <rotation x= y= z= unit="deg"/> angles compose
+as R = Rz(z) @ Ry(y) @ Rx(x), matching Geant4's G4GDMLReadDefine::GetRotationMatrix
+(CLHEP HepRotation::rotateX/Y/Z applied in that order from identity)."""
 
 from __future__ import annotations
 
@@ -25,8 +8,6 @@ import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
-# GDML units relative to mm (length) and radians (angle). Extend as needed;
-# these cover every unit BuildMUonE()/G4SystemOfUnits realistically emits.
 _LENGTH_UNITS_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
 _ANGLE_UNITS_RAD = {"deg": math.pi / 180.0, "rad": 1.0}
 
@@ -43,7 +24,7 @@ class StationGeometry:
 
 
 class GdmlFormatError(ValueError):
-    """The GDML file is missing an attribute or element this reader needs."""
+    pass
 
 
 def _strip_ns(tag: str) -> str:
@@ -57,12 +38,18 @@ def _required_attr(el: ET.Element, attr: str) -> str:
     return value
 
 
+def _required_lookup(table: dict[str, Vec3], ref: str, kind: str) -> Vec3:
+    value = table.get(ref)
+    if value is None:
+        raise GdmlFormatError(f"<{kind}ref> points to undefined <define> entry '{ref}'")
+    return value
+
+
 def _matmul3(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
     return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
 
 
 def _rotation_matrix_xyz(rx: float, ry: float, rz: float) -> list[list[float]]:
-    """R = Rz(rz) @ Ry(ry) @ Rx(rx), matching Geant4's GDML rotation import."""
     cx, sx = math.cos(rx), math.sin(rx)
     cy, sy = math.cos(ry), math.sin(ry)
     cz, sz = math.cos(rz), math.sin(rz)
@@ -75,7 +62,6 @@ def _rotation_matrix_xyz(rx: float, ry: float, rz: float) -> list[list[float]]:
 
 
 def _matrix_to_quaternion_xyzw(m: list[list[float]]) -> Quaternion:
-    """Standard rotation-matrix -> quaternion conversion (Shepperd's method)."""
     trace = m[0][0] + m[1][1] + m[2][2]
     if trace > 0:
         s = math.sqrt(trace + 1.0) * 2.0
@@ -114,14 +100,6 @@ def _read_vec3(el: ET.Element, unit_table: dict[str, float], default_unit: str) 
 
 
 def parse_gdml(path: str) -> list[StationGeometry]:
-    """Read the world volume's box daughters out of a GDML file.
-
-    Positions and rotations may be given inline on <physvol> or by reference
-    (<positionref>/<rotationref> into <define>); both forms are handled.
-    Daughters whose solid isn't a <box> are skipped rather than raised on,
-    since BuildMUonE() only ever places boxes -- if that changes, this is the
-    place to add the new solid type.
-    """
     root = ET.parse(path).getroot()
 
     positions: dict[str, Vec3] = {}
@@ -181,14 +159,14 @@ def parse_gdml(path: str) -> list[StationGeometry]:
         volume_ref = _required_attr(volumeref_el, "ref")
         size_mm = box_sizes_mm.get(volume_solid.get(volume_ref, ""))
         if size_mm is None:
-            continue  # not a box (or an unsupported solid type); skip
+            continue
 
         pos_el = physvol.find("position")
         posref_el = physvol.find("positionref")
         if pos_el is not None:
             center_mm = _read_vec3(pos_el, _LENGTH_UNITS_MM, "mm")
         elif posref_el is not None:
-            center_mm = positions.get(_required_attr(posref_el, "ref"), (0.0, 0.0, 0.0))
+            center_mm = _required_lookup(positions, _required_attr(posref_el, "ref"), "position")
         else:
             center_mm = (0.0, 0.0, 0.0)
 
@@ -197,7 +175,7 @@ def parse_gdml(path: str) -> list[StationGeometry]:
         if rot_el is not None:
             rotation_rad = _read_vec3(rot_el, _ANGLE_UNITS_RAD, "deg")
         elif rotref_el is not None:
-            rotation_rad = rotations.get(_required_attr(rotref_el, "ref"), (0.0, 0.0, 0.0))
+            rotation_rad = _required_lookup(rotations, _required_attr(rotref_el, "ref"), "rotation")
         else:
             rotation_rad = (0.0, 0.0, 0.0)
 

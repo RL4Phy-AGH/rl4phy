@@ -1,6 +1,7 @@
 {
   "typeCheckingMode": "standard",
   "extraPaths": [
+    "python",
     ".stubs/python",
     ".stubs/python/site-packages"
   ],

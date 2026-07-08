@@ -1,3 +1,6 @@
+volumes:
+  geant_build:
+
 services:
   stubs-generator:
     image: rl4phy-geant:latest
@@ -5,20 +8,15 @@ services:
     command:
       - -c
       - |
-        mkdir -p .stubs/cpp_generated .stubs/.sysroot .stubs/python
-        
+        mkdir -p .stubs/cpp_generated .stubs/.sysroot/usr .stubs/python
+
         protoc --proto_path=proto --cpp_out=.stubs/cpp_generated --grpc_out=.stubs/cpp_generated --plugin=protoc-gen-grpc=/usr/bin/grpc_cpp_plugin proto/rl4phy.proto
-        
-        # Mirror the whole /usr/include and /opt trees rather than an allowlist
-        # of packages: any future apt -dev package or Geant4 module shows up
-        # for clangd automatically, with no changes needed here. /usr/include
-        # is ~45MB and /opt is ~200MB (mostly Geant4), so a full copy is cheap;
-        # /usr/lib and /usr/bin are skipped since clangd only needs headers.
-        mkdir -p .stubs/.sysroot/usr
-        [ ! -d .stubs/.sysroot/usr/include ] && cp -r /usr/include .stubs/.sysroot/usr/include || true
-        [ ! -d .stubs/.sysroot/opt ] && cp -r /opt .stubs/.sysroot/opt || true
-        
-        chmod -R 777 .stubs || true
+
+        rm -rf .stubs/.sysroot/usr/include .stubs/.sysroot/opt
+        cp -r /usr/include .stubs/.sysroot/usr/include
+        cp -r /opt .stubs/.sysroot/opt
+
+        chmod -R 755 .stubs || true
     volumes:
       - .:/workspace
     working_dir: /workspace
@@ -27,11 +25,11 @@ services:
     volumes:
       - ./python:/app/python
       - ./.stubs/python:/app/generated
-      - gdml_export:/export:ro
     environment:
-      - PYTHONPATH=/app/python:/app/generated
+      PYTHONPATH: /app/python:/app/generated
     command: >
-      sh -c "cp -rn /usr/local/lib/python3.11/site-packages /app/generated/ || true &&
+      sh -c "mkdir -p /app/generated/site-packages &&
+      cp -au /usr/local/lib/python3.11/site-packages/. /app/generated/site-packages/ &&
       python /app/python/flatten_sys_path.py /app/generated/site-packages &&
       python -m grpc_tools.protoc 
       -I/app/proto 
@@ -40,7 +38,7 @@ services:
       --mypy_grpc_out=/app/generated 
       --grpc_python_out=/app/generated 
       /app/proto/rl4phy.proto && 
-      chmod -R 777 /app/generated || true &&
+      chmod -R 755 /app/generated || true &&
       python server.py"
     depends_on:
       stubs-generator:
@@ -53,14 +51,12 @@ services:
     volumes:
       - ./geant4:/app/geant4
       - ./proto:/app/proto
-      - gdml_export:/export
+      - geant_build:/app/geant4/MUonE/build
     entrypoint: sh
     command:
       - -c
       - |
         cmake -S /app/geant4/MUonE -B /app/geant4/MUonE/build -DGeant4_DIR=/opt/geant4/lib/cmake/Geant4 -DCMAKE_BUILD_TYPE=Release
         cmake --build /app/geant4/MUonE/build --config Release --parallel $$(nproc)
-        # G4GDMLWrite::Write() refuses to overwrite an existing file; /export is a
-        # volume that outlives container restarts, so clear the stale export first.
-        rm -f /export/muone.gdml
-        exec /app/geant4/MUonE/build/rl4phy-geant --export-gdml /export/muone.gdml --grpc-host python:50051 macros/run.mac
+        rm -f "$$GDML_EXPORT_PATH"
+        exec /app/geant4/MUonE/build/rl4phy-geant --export-gdml "$$GDML_EXPORT_PATH" --grpc-host python:50051 macros/run.mac
