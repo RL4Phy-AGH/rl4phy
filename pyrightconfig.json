@@ -1,0 +1,13 @@
+{
+  "typeCheckingMode": "standard",
+  "extraPaths": [
+    ".stubs/python",
+    ".stubs/python/site-packages"
+  ],
+  "exclude": [
+    ".stubs"
+  ],
+  "reportImplicitOverride": "none",
+  "reportImplicitStringConcatenation": "none",
+  "reportUnusedCallResult": "none"
+}

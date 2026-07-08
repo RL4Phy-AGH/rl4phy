@@ -1,0 +1,26 @@
+If:
+  PathMatch: geant4/MUonE/src/.*
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -isystem
+    - ../../../.stubs/.sysroot/usr/include
+    - -isystem
+    - ../../../.stubs/.sysroot/opt/geant4/include/Geant4
+    - -I
+    - ../../../.stubs/cpp_generated
+
+---
+If:
+  PathMatch: geant4/MUonE/.*
+CompileFlags:
+  Add:
+    - -std=c++17
+    - -isystem
+    - ../../.stubs/.sysroot/usr/include
+    - -isystem
+    - ../../.stubs/.sysroot/opt/geant4/include/Geant4
+    - -I
+    - ../../.stubs/cpp_generated
+    - -I
+    - src

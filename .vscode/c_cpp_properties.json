@@ -1,0 +1,19 @@
+{
+  "configurations": [
+    {
+      "name": "Linux",
+      "includePath": [
+        "${workspaceFolder}/**",
+        "${workspaceFolder}/.stubs/.sysroot/usr/include/**",
+        "${workspaceFolder}/.stubs/.sysroot/opt/geant4/include/Geant4/**",
+        "${workspaceFolder}/.stubs/cpp_generated/**"
+      ],
+      "defines": [],
+      "compilerPath": "/usr/bin/gcc",
+      "cStandard": "c17",
+      "cppStandard": "gnu++17",
+      "intelliSenseMode": "linux-gcc-x64"
+    }
+  ],
+  "version": 4
+}

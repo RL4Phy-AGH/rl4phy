@@ -1,0 +1,57 @@
+services:
+  stubs-generator:
+    image: rl4phy-geant:latest
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        mkdir -p .stubs/cpp_generated .stubs/.sysroot/usr/include .stubs/.sysroot/opt .stubs/python
+        
+        protoc --proto_path=proto --cpp_out=.stubs/cpp_generated --grpc_out=.stubs/cpp_generated --plugin=protoc-gen-grpc=/usr/bin/grpc_cpp_plugin proto/rl4phy.proto
+        
+        [ ! -d .stubs/.sysroot/usr/include/grpc ] && cp -r /usr/include/grpc .stubs/.sysroot/usr/include/ || true
+        [ ! -d .stubs/.sysroot/usr/include/grpc++ ] && cp -r /usr/include/grpc++ .stubs/.sysroot/usr/include/ || true
+        [ ! -d .stubs/.sysroot/usr/include/google ] && cp -r /usr/include/google .stubs/.sysroot/usr/include/ || true
+        [ ! -d .stubs/.sysroot/opt/geant4 ] && cp -r /opt/geant4 .stubs/.sysroot/opt/ || true
+        
+        chmod -R 777 .stubs || true
+    volumes:
+      - .:/workspace
+    working_dir: /workspace
+
+  python:
+    volumes:
+      - ./python:/app/python
+      - ./.stubs/python:/app/generated
+    environment:
+      - PYTHONPATH=/app/python:/app/generated
+    command: >
+      sh -c "cp -rn /usr/local/lib/python3.11/site-packages /app/generated/ || true &&
+      python -m grpc_tools.protoc 
+      -I/app/proto 
+      --python_out=/app/generated 
+      --mypy_out=/app/generated 
+      --mypy_grpc_out=/app/generated 
+      --grpc_python_out=/app/generated 
+      /app/proto/rl4phy.proto && 
+      chmod -R 777 /app/generated || true &&
+      python server.py"
+    depends_on:
+      stubs-generator:
+        condition: service_completed_successfully
+
+  geant:
+    depends_on:
+      stubs-generator:
+        condition: service_completed_successfully
+    volumes:
+      - ./geant4:/app/geant4
+      - ./proto:/app/proto
+    entrypoint: sh
+    command:
+      - -c
+      - |
+        cmake -S /app/geant4/MUonE -B /app/geant4/MUonE/build -DGeant4_DIR=/opt/geant4/lib/cmake/Geant4 -DCMAKE_BUILD_TYPE=Release
+        cmake --build /app/geant4/MUonE/build --config Release --parallel $$(nproc)
+        exec /app/geant4/MUonE/build/rl4phy-geant --grpc-host python:50051 macros/run.mac
+

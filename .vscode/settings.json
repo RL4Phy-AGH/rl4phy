@@ -1,0 +1,10 @@
+{
+  "python.analysis.extraPaths": [
+    "${workspaceFolder}/.stubs/python",
+    "${workspaceFolder}/.stubs/python/site-packages"
+  ],
+  "basedpyright.configPath": "${workspaceFolder}/pyrightconfig.json",
+  "clangd.arguments": [
+    "--header-insertion=never"
+  ]
+}
