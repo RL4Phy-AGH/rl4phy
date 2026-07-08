@@ -29,6 +29,8 @@ services:
     ports:
       - "50051:50051"
       - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
+    volumes:
+      - gdml_export:/export:ro
 
   geant:
     build:
@@ -41,6 +43,11 @@ services:
         condition: service_started
     volumes:
       - g4data:/data:ro
+      - gdml_export:/export
 
 volumes:
   g4data:
+  # Geant4 writes muone.gdml here (--export-gdml) right after building the
+  # detector; python reads it back to draw the real station geometry instead
+  # of a hardcoded copy. See python/gdml_geometry.py.
+  gdml_export:

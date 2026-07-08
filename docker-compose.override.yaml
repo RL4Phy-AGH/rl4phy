@@ -27,6 +27,7 @@ services:
     volumes:
       - ./python:/app/python
       - ./.stubs/python:/app/generated
+      - gdml_export:/export:ro
     environment:
       - PYTHONPATH=/app/python:/app/generated
     command: >
@@ -52,10 +53,14 @@ services:
     volumes:
       - ./geant4:/app/geant4
       - ./proto:/app/proto
+      - gdml_export:/export
     entrypoint: sh
     command:
       - -c
       - |
         cmake -S /app/geant4/MUonE -B /app/geant4/MUonE/build -DGeant4_DIR=/opt/geant4/lib/cmake/Geant4 -DCMAKE_BUILD_TYPE=Release
         cmake --build /app/geant4/MUonE/build --config Release --parallel $$(nproc)
-        exec /app/geant4/MUonE/build/rl4phy-geant --grpc-host python:50051 macros/run.mac
+        # G4GDMLWrite::Write() refuses to overwrite an existing file; /export is a
+        # volume that outlives container restarts, so clear the stale export first.
+        rm -f /export/muone.gdml
+        exec /app/geant4/MUonE/build/rl4phy-geant --export-gdml /export/muone.gdml --grpc-host python:50051 macros/run.mac
