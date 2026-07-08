@@ -1,10 +1,7 @@
 {
-  "python.analysis.extraPaths": [
-    "${workspaceFolder}/.stubs/python",
-    "${workspaceFolder}/.stubs/python/site-packages"
-  ],
-  "basedpyright.configPath": "${workspaceFolder}/pyrightconfig.json",
-  "clangd.arguments": [
-    "--header-insertion=never"
-  ]
+  // basedpyright reads project settings from pyrightconfig.json automatically
+  // (it searches upward from the workspace root); no extraPaths/configPath
+  // setting is needed or honored here. See pyrightconfig.json for the real
+  // config, and .stubs/ for where the mirrored packages/headers come from.
+  "clangd.arguments": ["--header-insertion=never"]
 }

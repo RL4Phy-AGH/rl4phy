@@ -5,14 +5,18 @@ services:
     command:
       - -c
       - |
-        mkdir -p .stubs/cpp_generated .stubs/.sysroot/usr/include .stubs/.sysroot/opt .stubs/python
+        mkdir -p .stubs/cpp_generated .stubs/.sysroot .stubs/python
         
         protoc --proto_path=proto --cpp_out=.stubs/cpp_generated --grpc_out=.stubs/cpp_generated --plugin=protoc-gen-grpc=/usr/bin/grpc_cpp_plugin proto/rl4phy.proto
         
-        [ ! -d .stubs/.sysroot/usr/include/grpc ] && cp -r /usr/include/grpc .stubs/.sysroot/usr/include/ || true
-        [ ! -d .stubs/.sysroot/usr/include/grpc++ ] && cp -r /usr/include/grpc++ .stubs/.sysroot/usr/include/ || true
-        [ ! -d .stubs/.sysroot/usr/include/google ] && cp -r /usr/include/google .stubs/.sysroot/usr/include/ || true
-        [ ! -d .stubs/.sysroot/opt/geant4 ] && cp -r /opt/geant4 .stubs/.sysroot/opt/ || true
+        # Mirror the whole /usr/include and /opt trees rather than an allowlist
+        # of packages: any future apt -dev package or Geant4 module shows up
+        # for clangd automatically, with no changes needed here. /usr/include
+        # is ~45MB and /opt is ~200MB (mostly Geant4), so a full copy is cheap;
+        # /usr/lib and /usr/bin are skipped since clangd only needs headers.
+        mkdir -p .stubs/.sysroot/usr
+        [ ! -d .stubs/.sysroot/usr/include ] && cp -r /usr/include .stubs/.sysroot/usr/include || true
+        [ ! -d .stubs/.sysroot/opt ] && cp -r /opt .stubs/.sysroot/opt || true
         
         chmod -R 777 .stubs || true
     volumes:
@@ -27,6 +31,7 @@ services:
       - PYTHONPATH=/app/python:/app/generated
     command: >
       sh -c "cp -rn /usr/local/lib/python3.11/site-packages /app/generated/ || true &&
+      python /app/python/flatten_sys_path.py /app/generated/site-packages &&
       python -m grpc_tools.protoc 
       -I/app/proto 
       --python_out=/app/generated 
@@ -54,4 +59,3 @@ services:
         cmake -S /app/geant4/MUonE -B /app/geant4/MUonE/build -DGeant4_DIR=/opt/geant4/lib/cmake/Geant4 -DCMAKE_BUILD_TYPE=Release
         cmake --build /app/geant4/MUonE/build --config Release --parallel $$(nproc)
         exec /app/geant4/MUonE/build/rl4phy-geant --grpc-host python:50051 macros/run.mac
-

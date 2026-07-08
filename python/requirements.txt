@@ -2,3 +2,9 @@ grpcio>=1.62.0
 grpcio-tools>=1.62.0
 protobuf>=4.25.0
 mypy-protobuf>=3.6.0
+rerun-sdk>=0.26.0
+
+# Typing-only: grpcio ships no py.typed marker (no inline type info), so
+# without this basedpyright/Pyrefly flag every `import grpc` as untyped.
+# Not used at runtime, but harmless to install in the image.
+types-grpcio>=1.0.0

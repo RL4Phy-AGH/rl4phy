@@ -28,6 +28,7 @@ services:
       dockerfile: python/Dockerfile
     ports:
       - "50051:50051"
+      - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
 
   geant:
     build:
