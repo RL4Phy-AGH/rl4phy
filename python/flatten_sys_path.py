@@ -1,19 +1,5 @@
-"""Flatten sys.path extras into a site-packages copy, for editor IntelliSense.
-
-Some packages (e.g. rerun-sdk) install a .pth file that appends a
-subdirectory of site-packages to sys.path at interpreter start. Python
-itself resolves this at runtime, but static analyzers (basedpyright,
-Pyrefly, ...) reading a plain copy of site-packages from .stubs/ don't
-process .pth files, so they never see those subdirectories.
-
-Rather than parsing .pth files by hand (which only handles the exact
-patterns we've seen so far), this asks the real interpreter what its
-resolved sys.path actually is -- that covers .pth files with a single
-path, .pth files with executable "import ..." lines, and anything else
-site.py knows how to do -- then replays the same relative layout inside
-a *copy* of site-packages (e.g. the one mirrored into .stubs/python for
-the host-side editor). Any future dependency that redirects its import
-root the same way is handled automatically, with no changes needed here.
+"""Copies packages relocated by .pth files into a flat site-packages tree,
+so static analyzers (which don't process .pth files) can see them.
 
 Usage: python flatten_sys_path.py <path-to-site-packages-copy>
 """

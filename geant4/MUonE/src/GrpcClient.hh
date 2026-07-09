@@ -13,7 +13,7 @@ public:
       : fStub(rl4phys::SendService::NewStub(std::move(channel))) {}
 
   void SendStepData(float x, float y, float z,
-                    float px, float py, float pz, float energy) {
+                    float px, float py, float pz, float energy, int track_id) {
     rl4phys::Data packet;
     packet.set_x(x);
     packet.set_y(y);
@@ -22,6 +22,7 @@ public:
     packet.set_py(py);
     packet.set_pz(pz);
     packet.set_energy(energy);
+    packet.set_track_id(track_id);
 
     rl4phys::Reply reply;
     grpc::ClientContext context;

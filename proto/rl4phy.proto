@@ -11,6 +11,7 @@ message Data
     float py = 5;
     float pz = 6;
     float energy = 7;
+    int32 track_id = 8;
 }
 
 message Reply {}

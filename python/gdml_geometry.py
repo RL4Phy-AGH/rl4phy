@@ -8,11 +8,13 @@ import math
 import xml.etree.ElementTree as ET
 from dataclasses import dataclass
 
+from squaternion import Quaternion
+
 _LENGTH_UNITS_MM = {"mm": 1.0, "cm": 10.0, "m": 1000.0}
 _ANGLE_UNITS_RAD = {"deg": math.pi / 180.0, "rad": 1.0}
 
 Vec3 = tuple[float, float, float]
-Quaternion = tuple[float, float, float, float]  # (x, y, z, w)
+QuaternionXYZW = tuple[float, float, float, float]
 
 
 @dataclass(frozen=True)
@@ -20,7 +22,7 @@ class StationGeometry:
     name: str
     half_size_mm: Vec3
     center_mm: Vec3
-    quaternion_xyzw: Quaternion
+    quaternion_xyzw: QuaternionXYZW
 
 
 class GdmlFormatError(ValueError):
@@ -45,49 +47,9 @@ def _required_lookup(table: dict[str, Vec3], ref: str, kind: str) -> Vec3:
     return value
 
 
-def _matmul3(a: list[list[float]], b: list[list[float]]) -> list[list[float]]:
-    return [[sum(a[i][k] * b[k][j] for k in range(3)) for j in range(3)] for i in range(3)]
-
-
-def _rotation_matrix_xyz(rx: float, ry: float, rz: float) -> list[list[float]]:
-    cx, sx = math.cos(rx), math.sin(rx)
-    cy, sy = math.cos(ry), math.sin(ry)
-    cz, sz = math.cos(rz), math.sin(rz)
-
-    rot_x = [[1.0, 0.0, 0.0], [0.0, cx, -sx], [0.0, sx, cx]]
-    rot_y = [[cy, 0.0, sy], [0.0, 1.0, 0.0], [-sy, 0.0, cy]]
-    rot_z = [[cz, -sz, 0.0], [sz, cz, 0.0], [0.0, 0.0, 1.0]]
-
-    return _matmul3(_matmul3(rot_z, rot_y), rot_x)
-
-
-def _matrix_to_quaternion_xyzw(m: list[list[float]]) -> Quaternion:
-    trace = m[0][0] + m[1][1] + m[2][2]
-    if trace > 0:
-        s = math.sqrt(trace + 1.0) * 2.0
-        w = 0.25 * s
-        x = (m[2][1] - m[1][2]) / s
-        y = (m[0][2] - m[2][0]) / s
-        z = (m[1][0] - m[0][1]) / s
-    elif m[0][0] > m[1][1] and m[0][0] > m[2][2]:
-        s = math.sqrt(1.0 + m[0][0] - m[1][1] - m[2][2]) * 2.0
-        w = (m[2][1] - m[1][2]) / s
-        x = 0.25 * s
-        y = (m[0][1] + m[1][0]) / s
-        z = (m[0][2] + m[2][0]) / s
-    elif m[1][1] > m[2][2]:
-        s = math.sqrt(1.0 + m[1][1] - m[0][0] - m[2][2]) * 2.0
-        w = (m[0][2] - m[2][0]) / s
-        x = (m[0][1] + m[1][0]) / s
-        y = 0.25 * s
-        z = (m[1][2] + m[2][1]) / s
-    else:
-        s = math.sqrt(1.0 + m[2][2] - m[0][0] - m[1][1]) * 2.0
-        w = (m[1][0] - m[0][1]) / s
-        x = (m[0][2] + m[2][0]) / s
-        y = (m[1][2] + m[2][1]) / s
-        z = 0.25 * s
-    return (x, y, z, w)
+def _euler_to_quaternion_xyzw(rx: float, ry: float, rz: float) -> QuaternionXYZW:
+    q = Quaternion.from_euler(rx, ry, rz)
+    return (q.x, q.y, q.z, q.w)
 
 
 def _read_vec3(el: ET.Element, unit_table: dict[str, float], default_unit: str) -> Vec3:
@@ -179,7 +141,7 @@ def parse_gdml(path: str) -> list[StationGeometry]:
         else:
             rotation_rad = (0.0, 0.0, 0.0)
 
-        quaternion = _matrix_to_quaternion_xyzw(_rotation_matrix_xyz(*rotation_rad))
+        quaternion = _euler_to_quaternion_xyzw(*rotation_rad)
 
         stations.append(
             StationGeometry(

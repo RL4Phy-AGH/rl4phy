@@ -36,11 +36,10 @@ a shared volume before running the beam macro. `python` parses that file
 geometry change in `DetectorConstruction.cc` shows up in the viewer
 automatically, no edit needed on the Python side.
 
-If no GDML export shows up within `GDML_WAIT_TIMEOUT_S` (default 60s),
-`python` shows a hardcoded fallback layout instead, but keeps watching
-and swaps in the real geometry the moment it appears. Both services read
-the export path from the shared `GDML_EXPORT_PATH` env var (set once in
-`docker-compose.yml`), so it only needs changing in one place.
+`python` polls for the file until it shows up — no timeout, no fallback.
+Both services read the export path from the shared `GDML_EXPORT_PATH` env
+var (set once in `docker-compose.yml`), so it only needs changing in one
+place.
 
 ## After changing code
 
