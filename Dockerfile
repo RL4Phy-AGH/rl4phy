@@ -28,8 +28,10 @@ RUN cmake -S /app/geant4/MUonE -B /app/geant4/MUonE/build \
     install -m 0755 /app/geant4/MUonE/build/rl4phy-geant /usr/local/bin/rl4phy-geant
 
 COPY geant4/MUonE/macros /work/macros
+COPY geant4/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /work
-VOLUME ["/data"]
-ENTRYPOINT ["/usr/local/bin/rl4phy-geant"]
+VOLUME ["/data", "/export"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--grpc-host", "python:50051", "macros/run.mac"]

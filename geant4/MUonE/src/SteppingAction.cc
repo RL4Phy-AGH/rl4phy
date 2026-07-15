@@ -48,7 +48,7 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
     fGrpcClient->SendStepData(
         static_cast<float>(x_mm), static_cast<float>(y_mm), static_cast<float>(z_mm),
         static_cast<float>(px_MeV), static_cast<float>(py_MeV), static_cast<float>(pz_MeV),
-        static_cast<float>(e_kin_MeV));
+        static_cast<float>(e_kin_MeV), track->GetTrackID());
   }
 #endif
 

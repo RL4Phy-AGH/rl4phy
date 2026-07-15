@@ -1,8 +1,6 @@
+x-gdml-export-path: &gdml_export_path /export/muone.gdml
+
 services:
-  # One-shot: fetch the Geant4 datasets into the g4data volume before geant runs.
-  # Versions match the G4*DATA paths baked into the geant image. G4NDL is left out
-  # since FTFP_BERT does not use the high-precision neutron data. The .ready marker
-  # keeps a second `up` from downloading everything again.
   g4data:
     image: alpine:3.20
     volumes:
@@ -28,6 +26,11 @@ services:
       dockerfile: python/Dockerfile
     ports:
       - "50051:50051"
+      - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
+    environment:
+      GDML_EXPORT_PATH: *gdml_export_path
+    volumes:
+      - gdml_export:/export:ro
 
   geant:
     build:
@@ -38,8 +41,12 @@ services:
         condition: service_completed_successfully
       python:
         condition: service_started
+    environment:
+      GDML_EXPORT_PATH: *gdml_export_path
     volumes:
       - g4data:/data:ro
+      - gdml_export:/export
 
 volumes:
   g4data:
+  gdml_export:
