@@ -19,6 +19,11 @@ RERUN_GRPC_PORT = 9876
 GDML_EXPORT_PATH = os.environ.get("GDML_EXPORT_PATH", "/export/muone.gdml")
 GDML_POLL_INTERVAL_S = 1.0
 
+# Where the GDML received over gRPC (issue #18) is dumped before parsing.
+GDML_GRPC_RECEIVED_PATH = os.environ.get(
+    "GDML_GRPC_RECEIVED_PATH", "/tmp/muone_received.gdml"
+)
+
 STATION_COLOR = [51, 153, 255]
 
 
@@ -111,6 +116,25 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             rr.Arrows3D(origins=[point], vectors=[direction], colors=color),
         )
 
+        return rl4phy_pb2.Reply()
+
+    def SendGeometry(self, request, context):
+        # Geometry hand-off (issue #18): Geant4 ships the exported GDML over
+        # gRPC, so the shared volume is no longer required to see the stations.
+        print(f"Received GDML over gRPC: {len(request.gdml)} bytes")
+        try:
+            with open(GDML_GRPC_RECEIVED_PATH, "wb") as gdml_file:
+                gdml_file.write(request.gdml)
+            stations = parse_gdml(GDML_GRPC_RECEIVED_PATH)
+        except Exception as exc:
+            print(f"Could not parse the GDML received over gRPC: {exc!r}")
+            return rl4phy_pb2.Reply()
+
+        if stations:
+            print(f"Loaded {len(stations)} station(s) from gRPC GDML")
+            log_detector(stations)
+        else:
+            print("GDML received over gRPC has no box-shaped stations")
         return rl4phy_pb2.Reply()
 
 
