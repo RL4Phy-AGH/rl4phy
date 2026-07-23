@@ -4,13 +4,35 @@
 
 #include "rl4phy.grpc.pb.h"
 
+#include <chrono>
 #include <iostream>
 #include <memory>
+#include <string>
 
 class GrpcClient {
 public:
   explicit GrpcClient(std::shared_ptr<grpc::Channel> channel)
       : fStub(rl4phys::SendService::NewStub(std::move(channel))) {}
+
+  // One-off geometry hand-off (issue #18). Unlike the per-step calls this one
+  // waits for the server: geometry is sent once at startup and the Python side
+  // may still be coming up.
+  bool SendGeometry(const std::string& gdmlContent) {
+    rl4phys::GeometryFile packet;
+    packet.set_gdml(gdmlContent);
+
+    rl4phys::Reply reply;
+    grpc::ClientContext context;
+    context.set_wait_for_ready(true);
+    context.set_deadline(std::chrono::system_clock::now() +
+                         std::chrono::seconds(30));
+    const grpc::Status status = fStub->SendGeometry(&context, packet, &reply);
+    if (!status.ok()) {
+      std::cerr << "SendGeometry failed: " << status.error_message()
+                << std::endl;
+    }
+    return status.ok();
+  }
 
   void SendStepData(float x, float y, float z,
                     float px, float py, float pz, float energy, int track_id) {

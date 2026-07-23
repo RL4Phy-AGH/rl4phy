@@ -16,7 +16,15 @@ message Data
 
 message Reply {}
 
+// One-off geometry hand-off (issue #18): the exported GDML is sent once at
+// startup, before any step data.
+message GeometryFile
+{
+    bytes gdml = 1;
+}
+
 service SendService
 {
     rpc SendData (Data) returns (Reply) {}
+    rpc SendGeometry (GeometryFile) returns (Reply) {}
 }
