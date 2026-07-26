@@ -5,9 +5,9 @@ The MUonE Geant4 application, plus its Dockerfile.
 ## Geometry
 
 Small Geant4 app that builds the detector in C++ and writes it out to GDML, so
-the Python side (pyg4ometry) can load the same geometry. The geometry and
-physics live in the C++; GDML is the export, not the source. (That's the split
-the team agreed for the architecture.)
+the Python side (`python/gdml_geometry.py`, a minimal hand-rolled reader, not
+pyg4ometry) can load the same geometry. The geometry and physics live in the
+C++; GDML is the export, not the source.
 
 - `src/DetectorConstruction.*`: `BuildMUonE()` builds the MUonE-scope geometry
   in C++: 3 silicon tracking stations along the beam (z = -300 / 0 / +300 mm),
@@ -51,10 +51,8 @@ the dataset versions have to match the ones Geant4 11.3 expects.
 
 ### Verification
 
-To sanity-check, run the binary: `--export-gdml` produces a GDML with the 3
-stations (clean names), and a beam run prints the `STEP` records (see the
-header). The real, portable test belongs in CI once it exists, on the Python
-side: pyg4ometry loads the exported GDML and validates it, which exercises the
-actual Geant4 -> Python interface.
+`.github/workflows/geant-ci.yml` builds the image and runs both smoke tests on
+every PR touching `geant4/**`: `--export-gdml` produces a GDML with the 3
+stations (clean names), and a beam run prints the `STEP` records.
 
 >The build above was verified on Windows, but the GDML export interface is platform-independent.

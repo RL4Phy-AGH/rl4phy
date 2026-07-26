@@ -5,7 +5,9 @@
 #include "FTFP_BERT.hh"
 #include "DetectorConstruction.hh"
 #include "ActionInitialization.hh"
+#include <fstream>
 #include <iostream>
+#include <iterator>
 #include <string>
 
 #ifdef RL4PHY_ENABLE_GDML
@@ -64,6 +66,22 @@ int main(int argc, char** argv) {
     // pointer-hash onto every name, and Python has to read this file.
     parser.Write(exportGdml, detector->GetWorldPV(), false);
     std::cout << "GDML EXPORTED: " << exportGdml << std::endl;
+
+#ifdef RL4PHY_ENABLE_GRPC
+    // Geometry hand-off (issue #18): ship the freshly exported GDML to the
+    // Python side over the same channel the steps use.
+    if (grpcClient) {
+      std::ifstream gdmlIn(exportGdml, std::ios::binary);
+      std::string gdmlContent((std::istreambuf_iterator<char>(gdmlIn)),
+                              std::istreambuf_iterator<char>());
+      if (gdmlContent.empty()) {
+        std::cerr << "GDML file is empty, nothing sent over gRPC." << std::endl;
+      } else if (grpcClient->SendGeometry(gdmlContent)) {
+        std::cout << "GDML SENT OVER GRPC: " << gdmlContent.size() << " bytes"
+                  << std::endl;
+      }
+    }
+#endif
   }
 #else
   if (!gdmlFile.empty() || !exportGdml.empty()) {

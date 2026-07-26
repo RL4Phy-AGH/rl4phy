@@ -2,13 +2,14 @@ syntax = "proto3";
 
 package rl4phys;
 
-// B1: energy deposit per step
+// B1: energy deposit per event
 message EventScoring
 {
     float edep = 1;
+    int32 event_id = 2;
 }
 
-// MUonE: one step inside volume
+// MUonE: one step inside a station volume
 message StepHit
 {
     float x = 1;
@@ -18,6 +19,10 @@ message StepHit
     float py = 5;
     float pz = 6;
     float e_kin = 7;
+    int32 track_id = 8;
+    int32 event_id = 9;
+    int32 parent_id = 10;
+    int32 pdg = 11;
 }
 
 //Oneof types defined in payload
@@ -32,7 +37,15 @@ message Data
 
 message Reply {}
 
+// One-off geometry hand-off (issue #18): the exported GDML is sent once at
+// startup, before any step data.
+message GeometryFile
+{
+    bytes gdml = 1;
+}
+
 service SendService
 {
     rpc SendData (Data) returns (Reply) {}
+    rpc SendGeometry (GeometryFile) returns (Reply) {}
 }

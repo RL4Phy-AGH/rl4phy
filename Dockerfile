@@ -37,8 +37,10 @@ RUN cmake -S /app/geant4/G4Examples -B /app/geant4/G4Examples/build \
 
 COPY geant4/MUonE/macros /work/macros
 COPY geant4/G4Examples/B1/run1.mac geant4/G4Examples/B1/run2.mac /work/B1/
+COPY geant4/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
+RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /work
-VOLUME ["/data"]
-ENTRYPOINT ["/usr/local/bin/rl4phy-geant"]
+VOLUME ["/data", "/export"]
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--grpc-host", "python:50051", "macros/run.mac"]
