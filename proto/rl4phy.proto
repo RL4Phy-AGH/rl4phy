@@ -2,7 +2,15 @@ syntax = "proto3";
 
 package rl4phys;
 
-message Data
+// B1: energy deposit per event
+message EventScoring
+{
+    float edep = 1;
+    int32 event_id = 2;
+}
+
+// MUonE: one step inside a station volume
+message StepHit
 {
     float x = 1;
     float y = 2;
@@ -10,8 +18,21 @@ message Data
     float px = 4;
     float py = 5;
     float pz = 6;
-    float energy = 7;
+    float e_kin = 7;
     int32 track_id = 8;
+    int32 event_id = 9;
+    int32 parent_id = 10;
+    int32 pdg = 11;
+}
+
+//Oneof types defined in payload
+message Data
+{
+    oneof payload
+    {
+        EventScoring event_scoring = 1;
+        StepHit step_hit = 2;
+    }
 }
 
 message Reply {}

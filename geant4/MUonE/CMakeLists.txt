@@ -11,7 +11,10 @@ include(${Geant4_USE_FILE})
 
 file(GLOB sources CONFIGURE_DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/src/*.cc)
 add_executable(rl4phy-geant main.cc ${sources})
-target_include_directories(rl4phy-geant PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/src)
+target_include_directories(rl4phy-geant PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/../commons
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    )
 target_link_libraries(rl4phy-geant PRIVATE ${Geant4_LIBRARIES})
 set_property(TARGET rl4phy-geant PROPERTY CXX_STANDARD 17)
 
