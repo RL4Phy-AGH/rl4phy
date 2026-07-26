@@ -85,38 +85,58 @@ def _direction_arrow_mm(px: float, py: float, pz: float) -> list[float]:
 
 class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
     def __init__(self) -> None:
-        self._step = 0
-        self._tracks: dict[int, list[list[float]]] = {}
-        self._track_colors: dict[int, list[int]] = {}
+        self.msg = 0
+        self._tracks: dict[tuple[int, int], list[list[float]]] = {}
+        self._track_colors: dict[tuple[int, int], list[int]] = {}
 
     def SendData(self, request, context):
-        print(
-            f"track={request.track_id} x={request.x:.2f} y={request.y:.2f} z={request.z:.2f} "
-            f"px={request.px:.2f} py={request.py:.2f} pz={request.pz:.2f} "
-            f"E={request.energy:.2f}"
-        )
+        self.msg += 1
+        kind = request.WhichOneof("payload")
 
-        track_id = request.track_id
-        if track_id not in self._tracks:
-            self._tracks[track_id] = []
-            self._track_colors[track_id] = _random_track_color()
-        track = self._tracks[track_id]
-        color = self._track_colors[track_id]
-
-        point = [request.x, request.y, request.z]
-        track.append(point)
-        direction = _direction_arrow_mm(request.px, request.py, request.pz)
-
-        rr.set_time("step", sequence=self._step)
-        self._step += 1
-        rr.log(f"world/tracks/{track_id}/points", rr.Points3D(track, colors=color))
-        rr.log(f"world/tracks/{track_id}/line", rr.LineStrips3D([track], colors=color))
-        rr.log(
-            f"world/tracks/{track_id}/direction",
-            rr.Arrows3D(origins=[point], vectors=[direction], colors=color),
-        )
+        if kind == "event_scoring":
+            s = request.event_scoring
+            print(
+                f"[{self.msg}] B1 event_scoring: event={s.event_id} "
+                f"edep = {s.edep:.6f} MeV"
+            )
+        elif kind == "step_hit":
+            self._log_step_hit(request.step_hit)
+        else:
+            print(f"[{self.msg}] unknown payload")
 
         return rl4phy_pb2.Reply()
+
+    def _log_step_hit(self, hit) -> None:
+        print(
+            f"[{self.msg}] MUonE step_hit: "
+            f"event={hit.event_id} track={hit.track_id} "
+            f"parent={hit.parent_id} pdg={hit.pdg}  "
+            f"x={hit.x:.2f} y={hit.y:.2f} z={hit.z:.2f} mm  "
+            f"px={hit.px:.2f} py={hit.py:.2f} pz={hit.pz:.2f} MeV/c  "
+            f"Ekin={hit.e_kin:.2f} MeV"
+        )
+
+        # Track ids restart with every event, so the event has to be part of the
+        # key (and of the entity path) to keep the polylines apart.
+        key = (hit.event_id, hit.track_id)
+        if key not in self._tracks:
+            self._tracks[key] = []
+            self._track_colors[key] = _random_track_color()
+        track = self._tracks[key]
+        color = self._track_colors[key]
+
+        point = [hit.x, hit.y, hit.z]
+        track.append(point)
+        direction = _direction_arrow_mm(hit.px, hit.py, hit.pz)
+
+        entity = f"world/tracks/{hit.event_id}/{hit.track_id}"
+        rr.set_time("step", sequence=self.msg)
+        rr.log(f"{entity}/points", rr.Points3D(track, colors=color))
+        rr.log(f"{entity}/line", rr.LineStrips3D([track], colors=color))
+        rr.log(
+            f"{entity}/direction",
+            rr.Arrows3D(origins=[point], vectors=[direction], colors=color),
+        )
 
     def SendGeometry(self, request, context):
         # Geometry hand-off (issue #18): Geant4 ships the exported GDML over
@@ -146,8 +166,11 @@ def start_server():
         f"rerun --connect rerun+http://127.0.0.1:{RERUN_GRPC_PORT}/proxy"
     )
 
-    # GrpcClient::SendStepData (C++) doesn't retry, so this port must be open
+    # GrpcClient::SendStepHit (C++) doesn't retry, so this port must be open
     # before the GDML wait below, not after.
+    # max_workers=1 is load-bearing: the servicer's counters and dicts are
+    # unsynchronized and Rerun's global step sequence assumes handlers run one at
+    # a time. Raising it requires adding locks first.
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(AgentServer(), server)
     server.add_insecure_port("0.0.0.0:50051")
