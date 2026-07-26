@@ -168,6 +168,9 @@ def start_server():
 
     # GrpcClient::SendStepHit (C++) doesn't retry, so this port must be open
     # before the GDML wait below, not after.
+    # max_workers=1 is load-bearing: the servicer's counters and dicts are
+    # unsynchronized and Rerun's global step sequence assumes handlers run one at
+    # a time. Raising it requires adding locks first.
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(AgentServer(), server)
     server.add_insecure_port("0.0.0.0:50051")

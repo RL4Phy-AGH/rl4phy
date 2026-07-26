@@ -9,12 +9,14 @@
 #include <memory>
 #include <string>
 
+// Threading: one client instance per thread; the grpc::Channel handed to the
+// constructor is thread-safe and may be shared between them.
 class GrpcClient {
 public:
   explicit GrpcClient(std::shared_ptr<grpc::Channel> channel)
       : fStub(rl4phys::SendService::NewStub(std::move(channel))) {}
 
-  void SendEventScoring(float edep_MeV, int event_id = -1) {
+  void SendEventScoring(float edep_MeV, int event_id) {
     rl4phys::Data packet;
     auto* scoring = packet.mutable_event_scoring();
     scoring->set_edep(edep_MeV);
@@ -22,13 +24,12 @@ public:
 
     rl4phys::Reply reply;
     grpc::ClientContext context;
-    fStub->SendData(&context, packet, &reply);
+    Report(fStub->SendData(&context, packet, &reply));
   }
 
   void SendStepHit(float x, float y, float z,
                    float px, float py, float pz, float e_kin_MeV,
-                   int track_id = -1, int event_id = -1, int parent_id = -1,
-                   int pdg = 0) {
+                   int track_id, int event_id, int parent_id, int pdg) {
     rl4phys::Data packet;
     auto* hit = packet.mutable_step_hit();
     hit->set_x(x);
@@ -45,7 +46,16 @@ public:
 
     rl4phys::Reply reply;
     grpc::ClientContext context;
-    fStub->SendData(&context, packet, &reply);
+    Report(fStub->SendData(&context, packet, &reply));
+  }
+
+  void SendStepHit(const rl4phys::StepHit& hit) {
+    rl4phys::Data packet;
+    *packet.mutable_step_hit() = hit;
+
+    rl4phys::Reply reply;
+    grpc::ClientContext context;
+    Report(fStub->SendData(&context, packet, &reply));
   }
 
   // One-off geometry hand-off (issue #18). Unlike the per-step calls this one
@@ -69,5 +79,15 @@ public:
   }
 
 private:
+  // The per-step senders are fire-and-forget, but a dead server would otherwise
+  // fail silently for the whole run, so say it once.
+  void Report(const grpc::Status& s) {
+    if (s.ok() || fWarned) return;
+    fWarned = true;
+    std::cerr << "gRPC send failed (" << s.error_message()
+              << "); further failures suppressed." << std::endl;
+  }
+
   std::unique_ptr<rl4phys::SendService::Stub> fStub;
+  bool fWarned = false;
 };
