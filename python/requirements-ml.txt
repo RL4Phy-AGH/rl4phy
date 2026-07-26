@@ -1,0 +1,5 @@
+# Offline tooling for rl4phy_env. Deliberately not installed into the server
+# image: nothing in the gRPC path needs gymnasium.
+gymnasium>=0.29.0
+numpy>=1.26.0
+pyarrow>=16.0.0

@@ -32,7 +32,7 @@ _ORDER_COLUMN = "step_index"
 STEP_COLUMNS = _ID_COLUMNS + _KINEMATIC_COLUMNS + (_ORDER_COLUMN,)
 
 
-def _step_schema():
+def step_schema():
     import pyarrow as pa
 
     fields = [pa.field(name, pa.int32()) for name in _ID_COLUMNS]
@@ -54,7 +54,7 @@ class ParquetStepWriter:
         os.makedirs(directory, exist_ok=True)
         self.path = os.path.join(directory, f"steps-{int(time.time())}.parquet")
         self._flush_rows = flush_rows
-        self._schema = _step_schema()
+        self._schema = step_schema()
         self._writer = pq.ParquetWriter(self.path, self._schema)
         self._buffer: dict[str, list] = {name: [] for name in STEP_COLUMNS}
         self._buffered = 0
