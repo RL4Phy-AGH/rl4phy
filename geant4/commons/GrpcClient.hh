@@ -14,7 +14,7 @@ public:
   explicit GrpcClient(std::shared_ptr<grpc::Channel> channel)
       : fStub(rl4phys::SendService::NewStub(std::move(channel))) {}
 
-  void SendEventScoring(float edep_MeV, int event_id) {
+  void SendEventScoring(float edep_MeV, int event_id = -1) {
     rl4phys::Data packet;
     auto* scoring = packet.mutable_event_scoring();
     scoring->set_edep(edep_MeV);
@@ -27,7 +27,8 @@ public:
 
   void SendStepHit(float x, float y, float z,
                    float px, float py, float pz, float e_kin_MeV,
-                   int track_id, int event_id, int parent_id, int pdg) {
+                   int track_id = -1, int event_id = -1, int parent_id = -1,
+                   int pdg = 0) {
     rl4phys::Data packet;
     auto* hit = packet.mutable_step_hit();
     hit->set_x(x);
