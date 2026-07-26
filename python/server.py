@@ -12,6 +12,7 @@ import rerun as rr
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
+from dataset_writer import maybe_create_step_writer
 from gdml_geometry import StationGeometry, parse_gdml
 
 RERUN_GRPC_PORT = 9876
@@ -88,6 +89,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         self.msg = 0
         self._tracks: dict[tuple[int, int], list[list[float]]] = {}
         self._track_colors: dict[tuple[int, int], list[int]] = {}
+        self._dataset = maybe_create_step_writer()
 
     def SendData(self, request, context):
         self.msg += 1
@@ -107,6 +109,9 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:
+        if self._dataset is not None:
+            self._dataset.append_step_hit(hit)
+
         print(
             f"[{self.msg}] MUonE step_hit: "
             f"event={hit.event_id} track={hit.track_id} "
