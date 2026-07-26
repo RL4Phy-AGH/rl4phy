@@ -3,3 +3,4 @@
 gymnasium>=0.29.0
 numpy>=1.26.0
 pyarrow>=16.0.0
+pytest>=8.0.0

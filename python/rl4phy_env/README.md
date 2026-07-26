@@ -19,7 +19,7 @@ bidirectional control exists — only the source of the next hit does.
 ## Task
 
 One episode is one particle track, i.e. all hits sharing an `(event_id,
-track_id)` key, ordered by the `step_index` written by the sink. Tracks with a
+track_id)` key, ordered by the `row_index` written by the sink. Tracks with a
 single hit are skipped.
 
 | | |
@@ -27,37 +27,65 @@ single hit are skipped.
 | observation | `(x, y, z, px, py, pz, e_kin)` of the current hit — mm, MeV/c, MeV |
 | action | `(x, y, z)` predicted for the next hit, in mm |
 | reward | `-‖prediction − truth‖` in mm |
-| terminated | the current observation is the last hit of the track |
-| truncated | unused |
+| terminated | never |
+| truncated | the recorded hits of the track are exhausted |
 
-The action space is the bounding box of the positions in the dataset plus a
-margin, so that `action_space.sample()` is a meaningful random baseline rather
-than noise around the origin.
+Running out of recorded hits is not a terminal state of the process being
+modelled — the particle carries on, only the recording stops — so the episode
+ends truncated, which keeps a bootstrapping learner from setting the value of the
+last observed state to zero.
+
+Both spaces are the bounding box of the loaded data plus a margin. For the action
+space that is what makes `action_space.sample()` a meaningful random baseline
+rather than noise around the origin; for the observation space it is a bound on
+what a recording contains, not a physical claim.
+
+Episodes are served in epochs: one pass visits every track exactly once, in
+dataset order, or in an order drawn from the environment's RNG with
+`shuffle=True`. `reset(seed=...)` starts a fresh epoch, so a seeded run is
+reproducible.
 
 ## Usage
+
+Record a dataset first. `RL4PHY_DATASET_DIR` is passed through to the python
+service, and `/datasets` inside the container is bound to `./datasets` on the
+host, so the parquet files show up next to the compose file (from the repository
+root):
+
+```bash
+RL4PHY_DATASET_DIR=/datasets docker compose up --build
+```
+
+```powershell
+$env:RL4PHY_DATASET_DIR="/datasets"; docker compose up --build
+```
+
+Stopping the stack (`docker compose down`, or Ctrl-C) closes the file; without
+`RL4PHY_DATASET_DIR` nothing is written at all. `datasets/` is gitignored.
 
 ```bash
 pip install -r python/requirements-ml.txt
 
-# record a dataset first (from the repository root)
-docker compose run -d -e RL4PHY_DATASET_DIR=/tmp/ds --service-ports python
-docker compose up geant
-docker cp <python-container>:/tmp/ds/steps-<ts>.parquet .
-
 cd python
-python -m pytest rl4phy_env/test_track_env.py
-python -m rl4phy_env.demo_random_agent --dataset ../steps-<ts>.parquet
+python -m pytest rl4phy_env/
+python -m rl4phy_env.demo_random_agent --dataset ../datasets
 ```
 
-`demo_random_agent.py` scores two policies on the same episodes: uniform random
-actions, and persistence (predict that the particle stays where it is). The
-persistence error in mm is the first benchmark number for the project — the
-cheapest possible surrogate, and the bar a trained model has to clear.
+`demo_random_agent.py` scores three policies on the same episodes: uniform random
+actions, persistence (predict that the particle stays where it is), and drift
+(persistence plus a constant step along z, its length averaged over the evaluated
+tracks). Errors are reported split into a transverse `(x, y)` and a longitudinal
+`(z)` part. persistence is the first benchmark number for the project — the
+cheapest possible surrogate, and the bar a trained model has to clear. drift fits
+its single parameter on the tracks it is scored on, so its number is a lower
+bound for a constant-step model rather than a held-out result.
 
 ```python
-from rl4phy_env import TrackPredictionEnv
+import gymnasium
 
-env = TrackPredictionEnv("steps-1753560000.parquet", shuffle=True)
+import rl4phy_env  # registers the id
+
+env = gymnasium.make("Rl4Phy/TrackPrediction-v0", dataset="datasets", shuffle=True)
 observation, info = env.reset(seed=0)
 observation, reward, terminated, truncated, info = env.step([0.0, 0.0, 0.0])
 ```

@@ -2,9 +2,9 @@
 
 Opt-in through the RL4PHY_DATASET_DIR environment variable: when it points at a
 writable directory the server dumps every StepHit it receives into
-``<dir>/steps-<unix-ts>.parquet``, one file per server run. With the variable
-unset (the default) nothing is imported and nothing is written, so the gRPC path
-behaves exactly as before.
+``<dir>/steps-<unix-ts>-<pid>.parquet``, one file per server run. With the
+variable unset (the default) nothing is imported and nothing is written, so the
+gRPC path behaves exactly as before.
 
 The recorded files are the input of ``python/rl4phy_env``, which replays them as
 RL episodes.
@@ -25,9 +25,13 @@ DEFAULT_FLUSH_ROWS = 1000
 _ID_COLUMNS = ("event_id", "track_id", "parent_id", "pdg")
 _KINEMATIC_COLUMNS = ("x", "y", "z", "px", "py", "pz", "e_kin")
 # Geant4 streams the steps of a track in step order over a synchronous unary
-# RPC, so arrival order is step order. step_index freezes that order in the file
+# RPC, so arrival order is step order. row_index freezes that order in the file
 # instead of relying on the row order surviving every parquet reader.
-_ORDER_COLUMN = "step_index"
+#
+# It is this writer's own row counter and nothing more. The proper fix is a
+# StepHit field carrying Geant4's own step number: that one survives a dropped
+# RPC, a reconnect and a second writer, none of which a local counter does.
+_ORDER_COLUMN = "row_index"
 
 STEP_COLUMNS = _ID_COLUMNS + _KINEMATIC_COLUMNS + (_ORDER_COLUMN,)
 
@@ -37,7 +41,8 @@ def step_schema():
 
     fields = [pa.field(name, pa.int32()) for name in _ID_COLUMNS]
     fields += [pa.field(name, pa.float32()) for name in _KINEMATIC_COLUMNS]
-    fields.append(pa.field(_ORDER_COLUMN, pa.int32()))
+    # A long run can outgrow int32; the ids cannot.
+    fields.append(pa.field(_ORDER_COLUMN, pa.int64()))
     return pa.schema(fields)
 
 
@@ -46,20 +51,32 @@ class ParquetStepWriter:
 
     pyarrow is imported here rather than at module scope so that a server run
     without RL4PHY_DATASET_DIR never pays for it.
+
+    A parquet file only becomes readable once its footer is written, and the
+    footer is written by ``close()``. The ordinary exits are covered -- atexit,
+    and the SIGTERM that ``docker stop`` sends -- but a SIGKILL, a segfault or a
+    lost machine takes the whole recording with it, not just the buffered tail.
+    Rotating into several files would bound that loss; until a recording is long
+    enough for that to hurt, the answer is to record it again.
     """
 
     def __init__(self, directory: str, flush_rows: int = DEFAULT_FLUSH_ROWS) -> None:
         import pyarrow.parquet as pq
 
         os.makedirs(directory, exist_ok=True)
-        self.path = os.path.join(directory, f"steps-{int(time.time())}.parquet")
+        # The pid keeps two servers started in the same second apart.
+        name = f"steps-{int(time.time())}-{os.getpid()}.parquet"
+        self.path = os.path.join(directory, name)
         self._flush_rows = flush_rows
         self._schema = step_schema()
         self._writer = pq.ParquetWriter(self.path, self._schema)
         self._buffer: dict[str, list] = {name: [] for name in STEP_COLUMNS}
         self._buffered = 0
         self.rows_written = 0
-        self._lock = threading.Lock()
+        # Reentrant: the SIGTERM handler below runs on the main thread and calls
+        # close(), so with a plain Lock a signal arriving while that same thread
+        # is inside append_step_hit() would deadlock on itself.
+        self._lock = threading.RLock()
         self._closed = False
 
     def append_step_hit(self, hit) -> None:

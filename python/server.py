@@ -109,8 +109,14 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:
+        # Recording is a side job: a broken sink must not take the gRPC path or
+        # the rerun logging down with it.
         if self._dataset is not None:
-            self._dataset.append_step_hit(hit)
+            try:
+                self._dataset.append_step_hit(hit)
+            except Exception as exc:
+                print(f"Dataset: disabling sink after {exc!r}")
+                self._dataset = None
 
         print(
             f"[{self.msg}] MUonE step_hit: "

@@ -5,3 +5,4 @@ python/rl4phy_pb2_grpc.py
 python/__pycache__/
 python/rl4phy_env/__pycache__/
 python/.pytest_cache/
+datasets/
