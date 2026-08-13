@@ -29,8 +29,12 @@ services:
       - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
     environment:
       GDML_EXPORT_PATH: *gdml_export_path
+      # Recording is opt-in and off by default. Set RL4PHY_DATASET_DIR=/datasets
+      # on the host to write the parquet files into ./datasets there.
+      RL4PHY_DATASET_DIR: ${RL4PHY_DATASET_DIR:-}
     volumes:
       - gdml_export:/export:ro
+      - ./datasets:/datasets
 
   geant:
     build:
