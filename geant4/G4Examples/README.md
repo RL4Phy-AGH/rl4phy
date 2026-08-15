@@ -204,6 +204,8 @@ Two details it takes care of, both easy to get wrong by hand:
 2. **Extend the proto** — new `message` + new `oneof` arm (do not break existing ones).
 3. **Integrate in C++** — prefer a separate `*_rl4phys.cc`; subclass existing actions;
    call base methods before adding gRPC; avoid editing the original example if possible.
+   Send through `commons/GrpcClient.hh` (already on the include path) rather than
+   holding a stub of your own — add a `Send<Payload>()` there for the new message.
 4. **CMake / Docker** — add `rl4phy_add_example(<Name>)` to `CMakeLists.txt`
    (one line; the helper handles sources, headers, gRPC and macros), then
    install the new binary and its macros in the `Dockerfile` next to the
@@ -217,8 +219,8 @@ Two details it takes care of, both easy to get wrong by hand:
 
 | Example | Location | Payload |
 |---------|----------|---------|
-| B1 | `G4Examples/B1_rl4phys.cc` | `event_scoring` |
-| B5 | `G4Examples/B5_rl4phys.cc` | `b5_event` |
+| B1 | `G4Examples/B1_rl4phys.cc` | `event_scoring` (own stub, not yet on `commons/GrpcClient.hh`) |
+| B5 | `G4Examples/B5_rl4phys.cc` | `b5_event` (uses `commons/GrpcClient.hh`) |
 | MUonE | `geant4/MUonE/` | `step_hit` (uses `commons/GrpcClient.hh`) |
 
 ---

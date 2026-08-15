@@ -33,8 +33,9 @@
 #include "G4SystemOfUnits.hh"
 #include "G4VHitsCollection.hh"
 
+#include "GrpcClient.hh"
+
 #include <grpcpp/grpcpp.h>
-#include "rl4phy.grpc.pb.h"
 
 #include <algorithm>
 #include <array>
@@ -73,7 +74,7 @@ class GrpcEventAction : public EventAction
 {
   public:
     explicit GrpcEventAction(std::shared_ptr<grpc::Channel> channel)
-      : fStub(rl4phys::SendService::NewStub(std::move(channel)))
+      : fClient(std::move(channel))
     {}
 
     void BeginOfEventAction(const G4Event* event) override
@@ -104,41 +105,26 @@ class GrpcEventAction : public EventAction
       // here, so it has to run before anything is read back below.
       EventAction::EndOfEventAction(event);
 
-      rl4phys::Data data;
-
-      auto b5Event = data.mutable_b5_event();
-      b5Event->set_event_id(event->GetEventID());
+      rl4phys::B5Event b5Event;
+      b5Event.set_event_id(event->GetEventID());
 
       // One value per arm: chamber 1/2 and hodoscope 1/2.
       for (G4int iDet = 0; iDet < kDim; ++iDet) {
-        b5Event->add_drift_chamber_hits(NofHits(event, fDriftHCID[iDet]));
-        b5Event->add_hodoscope_time(FirstHodoscopeTime(event, fHodHCID[iDet]));
+        b5Event.add_drift_chamber_hits(NofHits(event, fDriftHCID[iDet]));
+        b5Event.add_hodoscope_time(FirstHodoscopeTime(event, fHodHCID[iDet]));
       }
 
       // One value per calorimeter cell: kNofEmCells then kNofHadCells.
       for (auto edep : GetEmCalEdep()) {
-        b5Event->add_em_cal_edep(static_cast<float>(edep / MeV));
+        b5Event.add_em_cal_edep(static_cast<float>(edep / MeV));
       }
 
       for (auto edep : GetHadCalEdep()) {
-        b5Event->add_had_cal_edep(static_cast<float>(edep / MeV));
+        b5Event.add_had_cal_edep(static_cast<float>(edep / MeV));
       }
 
-      rl4phys::Reply reply;
-      grpc::ClientContext ctx;
-
-      auto status = fStub->SendData(&ctx, data, &reply);
-
-      if (!status.ok() && !fSendFailed) {
-        fSendFailed = true;
-
-        G4cerr
-            << "gRPC SendData failed at event "
-            << event->GetEventID()
-            << ": " << status.error_message()
-            << " (further failures on this thread are not reported)"
-            << G4endl;
-      }
+      // A failed send is reported once per client, i.e. once per worker thread.
+      fClient.SendB5Event(b5Event);
     }
 
   private:
@@ -166,10 +152,10 @@ class GrpcEventAction : public EventAction
       return static_cast<float>(first / ns);
     }
 
-    std::unique_ptr<rl4phys::SendService::Stub> fStub;
+    // One client per event action, i.e. one per worker thread.
+    GrpcClient fClient;
     std::array<G4int, kDim> fHodHCID = {-1, -1};
     std::array<G4int, kDim> fDriftHCID = {-1, -1};
-    G4bool fSendFailed = false;
 };
 
 
@@ -182,7 +168,7 @@ class RL4PhysActionInitialization : public ActionInitialization
 
     void BuildForMaster() const override
     {
-      // The master thread runs no event, so it needs no gRPC stub.
+      // The master thread runs no event, so it needs no gRPC client.
       ActionInitialization::BuildForMaster();
     }
 

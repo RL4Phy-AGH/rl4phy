@@ -7,7 +7,7 @@
 # expects, next to the calling CMakeLists.txt:
 #
 #   B5/           the untouched upstream example (src/, include/, macros)
-#   B5_rl4phys.cc our entry point, built against B5/include
+#   B5_rl4phys.cc our entry point, built against B5/include and geant4/commons
 #
 # and produces the executable B5_rl4phys with the example's macros copied to
 # <build>/B5/ so it can be run straight from the build directory.
@@ -20,6 +20,13 @@
 include_guard(GLOBAL)
 
 include(${CMAKE_CURRENT_LIST_DIR}/RL4PhyGrpc.cmake)
+
+# geant4/commons, resolved from this file's own location the way
+# RL4PhyGrpc.cmake resolves the proto directory. Cached because include_guard
+# makes this file run in one directory scope only, while the function may be
+# called from another.
+get_filename_component(_rl4phy_commons "${CMAKE_CURRENT_LIST_DIR}/../commons" ABSOLUTE)
+set(RL4PHY_COMMONS_DIR "${_rl4phy_commons}" CACHE INTERNAL "RL4PHYS shared headers")
 
 function(rl4phy_add_example _name)
   set(_dir ${CMAKE_CURRENT_SOURCE_DIR}/${_name})
@@ -36,7 +43,9 @@ function(rl4phy_add_example _name)
   file(GLOB _headers CONFIGURE_DEPENDS ${_dir}/include/*.hh)
 
   add_executable(${_name}_rl4phys ${_main} ${_sources} ${_headers})
-  target_include_directories(${_name}_rl4phys PRIVATE ${_dir}/include)
+  # The example's own headers plus geant4/commons, so every entry point gets the
+  # shared gRPC client (GrpcClient.hh) without repeating the path.
+  target_include_directories(${_name}_rl4phys PRIVATE ${_dir}/include ${RL4PHY_COMMONS_DIR})
   target_link_libraries(${_name}_rl4phys PRIVATE ${Geant4_LIBRARIES})
   rl4phy_enable_grpc(${_name}_rl4phys)
 

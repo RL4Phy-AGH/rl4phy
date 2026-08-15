@@ -21,10 +21,7 @@ public:
     auto* scoring = packet.mutable_event_scoring();
     scoring->set_edep(edep_MeV);
     scoring->set_event_id(event_id);
-
-    rl4phys::Reply reply;
-    grpc::ClientContext context;
-    Report(fStub->SendData(&context, packet, &reply));
+    Send(packet);
   }
 
   void SendStepHit(float x, float y, float z,
@@ -43,19 +40,22 @@ public:
     hit->set_event_id(event_id);
     hit->set_parent_id(parent_id);
     hit->set_pdg(pdg);
-
-    rl4phys::Reply reply;
-    grpc::ClientContext context;
-    Report(fStub->SendData(&context, packet, &reply));
+    Send(packet);
   }
 
   void SendStepHit(const rl4phys::StepHit& hit) {
     rl4phys::Data packet;
     *packet.mutable_step_hit() = hit;
+    Send(packet);
+  }
 
-    rl4phys::Reply reply;
-    grpc::ClientContext context;
-    Report(fStub->SendData(&context, packet, &reply));
+  // One summary per event for the double arm spectrometer (B5). The caller
+  // fills the message, since which hit collections make up an event is the
+  // example's business, not the transport's.
+  void SendB5Event(const rl4phys::B5Event& event) {
+    rl4phys::Data packet;
+    *packet.mutable_b5_event() = event;
+    Send(packet);
   }
 
   // One-off geometry hand-off (issue #18). Unlike the per-step calls this one
@@ -79,6 +79,14 @@ public:
   }
 
 private:
+  // Every payload goes out the same way: one unary call, no retry, no waiting
+  // for the server to come up.
+  void Send(const rl4phys::Data& packet) {
+    rl4phys::Reply reply;
+    grpc::ClientContext context;
+    Report(fStub->SendData(&context, packet, &reply));
+  }
+
   // The per-step senders are fire-and-forget, but a dead server would otherwise
   // fail silently for the whole run, so say it once.
   void Report(const grpc::Status& s) {
