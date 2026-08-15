@@ -101,6 +101,8 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             )
         elif kind == "step_hit":
             self._log_step_hit(request.step_hit)
+        elif kind == "b5_event":
+            self._log_b5_event(request.b5_event)
         else:
             print(f"[{self.msg}] unknown payload")
 
@@ -136,6 +138,24 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         rr.log(
             f"{entity}/direction",
             rr.Arrows3D(origins=[point], vectors=[direction], colors=color),
+        )
+
+    def _log_b5_event(self, event) -> None:
+        # The calorimeter cells arrive one value per cell and most of them are
+        # empty, so print the totals the way B5's own EndOfEventAction does.
+        chamber_hits = ", ".join(str(n) for n in event.drift_chamber_hits)
+        # An arm the particle missed reports -1 instead of a hit time.
+        hodoscope_times = ", ".join(
+            "none" if t < 0.0 else f"{t:.2f}" for t in event.hodoscope_time
+        )
+        print(
+            f"[{self.msg}] B5 b5_event: event={event.event_id}  "
+            f"chamber hits = [{chamber_hits}]  "
+            f"hodoscope t = [{hodoscope_times}] ns  "
+            f"EM edep = {sum(event.em_cal_edep):.6f} MeV "
+            f"in {len(event.em_cal_edep)} cells  "
+            f"Had edep = {sum(event.had_cal_edep):.6f} MeV "
+            f"in {len(event.had_cal_edep)} cells"
         )
 
     def SendGeometry(self, request, context):

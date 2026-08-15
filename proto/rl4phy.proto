@@ -25,6 +25,23 @@ message StepHit
     int32 pdg = 11;
 }
 
+// B5: double arm spectrometer, one event summarised after all hits are collected
+message B5Event
+{
+    // Not a unique key: it restarts at 0 on every /run/beamOn and multithreaded
+    // runs deliver events out of order.
+    int32 event_id = 1;
+    // Two values per arm-indexed field: chamber 1/2, hodoscope 1/2. An arm the
+    // particle missed reports 0 hits and a hodoscope time of -1.
+    repeated int32 drift_chamber_hits = 2;
+    repeated float hodoscope_time = 3;  // time of the first hit, ns
+    // Every cell of every event, MeV, empty ones included: 80 EM cells
+    // (kNofEmCells), 20 hadronic (kNofHadCells). Both index as
+    // column * rows + row, so they reshape to (20, 4) and (10, 2).
+    repeated float em_cal_edep = 4;
+    repeated float had_cal_edep = 5;
+}
+
 //Oneof types defined in payload
 message Data
 {
@@ -32,6 +49,7 @@ message Data
     {
         EventScoring event_scoring = 1;
         StepHit step_hit = 2;
+        B5Event b5_event = 3;
     }
 }
 

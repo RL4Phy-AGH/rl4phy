@@ -33,10 +33,12 @@ RUN cmake -S /app/geant4/G4Examples -B /app/geant4/G4Examples/build \
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_GEANT4_UIVIS=OFF && \
     cmake --build /app/geant4/G4Examples/build --config Release --parallel $(nproc) && \
-    install -m 0755 /app/geant4/G4Examples/build/B1_rl4phys /usr/local/bin/B1_rl4phys
+    install -m 0755 /app/geant4/G4Examples/build/B1_rl4phys /usr/local/bin/B1_rl4phys && \
+    install -m 0755 /app/geant4/G4Examples/build/B5_rl4phys /usr/local/bin/B5_rl4phys
 
 COPY geant4/MUonE/macros /work/macros
 COPY geant4/G4Examples/B1/run1.mac geant4/G4Examples/B1/run2.mac /work/B1/
+COPY geant4/G4Examples/B5/run1.mac geant4/G4Examples/B5/run2.mac /work/B5/
 COPY geant4/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
