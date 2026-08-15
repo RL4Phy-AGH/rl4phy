@@ -161,14 +161,29 @@ must be the same number. On the last event of `run1.mac` both read
 
 ### CMake note
 
-`B1` and `B5` both ship a `DetectorConstruction.hh`, `EventAction.hh`,
-`RunAction.hh`, `ActionInitialization.hh` and `PrimaryGeneratorAction.hh` — they
-only differ by namespace. A global include path would let one example pick up
-the other's headers, so each target gets its own include directory instead
-(`target_include_directories`), the way the upstream examples do it. The proto
-stubs are generated once into a shared `rl4phy_proto` object library; generating
-them per target would mean two custom commands writing the same output, which
-CMake rejects.
+`CMakeLists.txt` here stays as short as the upstream `examples/basic` one: the
+plumbing lives in `geant4/cmake/`, and every example is a single line.
+
+```cmake
+rl4phy_add_example(B1)
+rl4phy_add_example(B5)
+```
+
+`rl4phy_add_example(<Name>)` (in `geant4/cmake/RL4PhyExample.cmake`) builds
+`<Name>_rl4phys.cc` together with `<Name>/src/*.cc`, points the target at
+`<Name>/include`, links Geant4 and gRPC, and copies the example's macros to
+`<build>/<Name>/`.
+
+Two details it takes care of, both easy to get wrong by hand:
+
+- **Headers are per target, never global.** B1 and B5 both ship a
+  `DetectorConstruction.hh`, `EventAction.hh`, `RunAction.hh`,
+  `ActionInitialization.hh` and `PrimaryGeneratorAction.hh`, differing only by
+  namespace, so a global include path would let one example pick up the other's
+  headers.
+- **The proto stubs are generated once** into a shared `rl4phy_proto` object
+  library (`geant4/cmake/RL4PhyGrpc.cmake`). Generating them per target would
+  mean two custom commands writing the same output, which CMake rejects.
 
 ### Key files
 
@@ -176,7 +191,9 @@ CMake rejects.
 |------|------|
 | `B5/` | original Geant4 example, unmodified |
 | `B5_rl4phys.cc` | gRPC integration |
-| `CMakeLists.txt` | builds `B5_rl4phys`, shares the generated proto stubs |
+| `CMakeLists.txt` | one line: `rl4phy_add_example(B5)` |
+| `geant4/cmake/RL4PhyExample.cmake` | builds any vendored example as `<Name>_rl4phys` |
+| `geant4/cmake/RL4PhyGrpc.cmake` | gRPC discovery and the shared `rl4phy_proto` stubs |
 | `Dockerfile` | installs `B5_rl4phys`, ships `B5/run1.mac`, `B5/run2.mac` |
 
 ---
@@ -187,7 +204,10 @@ CMake rejects.
 2. **Extend the proto** — new `message` + new `oneof` arm (do not break existing ones).
 3. **Integrate in C++** — prefer a separate `*_rl4phys.cc`; subclass existing actions;
    call base methods before adding gRPC; avoid editing the original example if possible.
-4. **CMake / Docker** — copy the `B1_rl4phys` setup.
+4. **CMake / Docker** — add `rl4phy_add_example(<Name>)` to `CMakeLists.txt`
+   (one line; the helper handles sources, headers, gRPC and macros), then
+   install the new binary and its macros in the `Dockerfile` next to the
+   existing ones.
 5. **Python** — handle the new payload in `server.py`.
 6. **Verify** — compare output with the original example (with and without gRPC).
 
