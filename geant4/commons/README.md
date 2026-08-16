@@ -19,6 +19,11 @@ geometry is what the trajectories are drawn on. `GeometryExport::SendForRun()`
 goes in `BeginOfRunAction`; it sends on the master thread only, so a
 multithreaded example does not send one copy per worker.
 
+The first geometry of a job waits up to 30 s for the receiver, because it goes
+out before the first event and the Python side may still be starting. Only the
+first one waits: with nothing listening, `B5/run1.mac` pauses once rather than
+once per run, and still says on every run that its geometry reached nobody.
+
 Examples get this directory on their include path from
 `rl4phy_add_example()` in `geant4/cmake/RL4PhyExample.cmake`; MUonE adds it
 itself in `geant4/MUonE/CMakeLists.txt`.
