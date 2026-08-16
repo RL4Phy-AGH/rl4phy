@@ -468,12 +468,12 @@ Then:
 ```powershell
 docker compose build python geant
 docker compose up -d python
-docker compose run --rm --entrypoint Name_rl4phys geant --grpc-host python:50051 Name/run1.mac
+docker compose run --rm geant Name_rl4phys --grpc-host python:50051 Name/run1.mac
 docker compose logs python
 ```
 
-`--entrypoint` is required — the image's own entrypoint runs the MUonE
-application. To watch instead of reading the log:
+The image has no entrypoint: the binary is the first argument. With no arguments
+it runs the MUonE application. To watch instead of reading the log:
 
 ```powershell
 rerun --connect rerun+http://127.0.0.1:9876/proxy
@@ -670,7 +670,7 @@ no trajectories to send.
 ```powershell
 docker compose build python geant
 docker compose up -d python
-docker compose run --rm --entrypoint B5_rl4phys geant --grpc-host python:50051 B5/run1.mac
+docker compose run --rm geant B5_rl4phys --grpc-host python:50051 B5/run1.mac
 docker compose logs python
 ```
 
