@@ -39,10 +39,10 @@ RUN cmake -S /app/geant4/G4Examples -B /app/geant4/G4Examples/build \
 COPY geant4/MUonE/macros /work/macros
 COPY geant4/G4Examples/B1/run1.mac geant4/G4Examples/B1/run2.mac /work/B1/
 COPY geant4/G4Examples/B5/run1.mac geant4/G4Examples/B5/run2.mac /work/B5/
-COPY geant4/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
-RUN chmod +x /usr/local/bin/docker-entrypoint.sh
-
 WORKDIR /work
 VOLUME ["/data"]
-ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+# The MUonE application is the default; B1_rl4phys and B5_rl4phys are run with
+# --entrypoint. There used to be a wrapper script here, but its only job was the
+# file-based geometry export, which the per-run gRPC hand-off replaced.
+ENTRYPOINT ["/usr/local/bin/rl4phy-geant"]
 CMD ["--grpc-host", "python:50051", "macros/run.mac"]
