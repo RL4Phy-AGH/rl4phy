@@ -1,8 +1,6 @@
 #!/bin/sh
-if [ -n "$GDML_EXPORT_PATH" ]; then
-  # G4GDMLWrite::Write() refuses to overwrite an existing file.
-  rm -f "$GDML_EXPORT_PATH"
-  exec /usr/local/bin/rl4phy-geant --export-gdml "$GDML_EXPORT_PATH" "$@"
-fi
-
+# The geometry no longer travels through a file: GeometryExport writes the GDML
+# to tmpfs, reads it back and ships it over gRPC at the start of every run, then
+# deletes it. --export-gdml is still there for a human who wants a copy to open,
+# but it is asked for explicitly rather than written behind everyone's back.
 exec /usr/local/bin/rl4phy-geant "$@"

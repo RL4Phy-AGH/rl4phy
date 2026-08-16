@@ -1,5 +1,3 @@
-x-gdml-export-path: &gdml_export_path /export/muone.gdml
-
 services:
   g4data:
     image: alpine:3.20
@@ -27,10 +25,9 @@ services:
     ports:
       - "50051:50051"
       - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
-    # No /export mount: geometry arrives over gRPC at the start of every run, so
-    # the receiver has no reason to read a file. The volume only ever held the
-    # MUonE detector anyway, because docker-entrypoint.sh writes it and the other
-    # examples are launched past that entrypoint.
+    # No shared volume between the two services: geometry arrives over gRPC at
+    # the start of every run, straight from tmpfs on the Geant4 side, so neither
+    # end has a file to hand over.
 
   geant:
     build:
@@ -41,12 +38,8 @@ services:
         condition: service_completed_successfully
       python:
         condition: service_started
-    environment:
-      GDML_EXPORT_PATH: *gdml_export_path
     volumes:
       - g4data:/data:ro
-      - gdml_export:/export
 
 volumes:
   g4data:
-  gdml_export:

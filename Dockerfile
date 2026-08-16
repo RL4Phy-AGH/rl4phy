@@ -43,6 +43,6 @@ COPY geant4/docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN chmod +x /usr/local/bin/docker-entrypoint.sh
 
 WORKDIR /work
-VOLUME ["/data", "/export"]
+VOLUME ["/data"]
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
 CMD ["--grpc-host", "python:50051", "macros/run.mac"]
