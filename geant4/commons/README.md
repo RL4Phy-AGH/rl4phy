@@ -1,7 +1,7 @@
 # commons
 
-Shared tools for Geant4-based apps. In use by MUonE and by the B5 example; B1
-still carries its own stub and is due to follow.
+Shared tools for Geant4-based apps. In use by MUonE, B5 and B1: none of them
+holds a protobuf stub of its own any more.
 
 | Header | What it does |
 |--------|--------------|

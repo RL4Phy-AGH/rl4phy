@@ -8,11 +8,16 @@ project(G4Examples)
 # You can set WITH_GEANT4_UIVIS to OFF via the command line or ccmake/cmake-gui
 # to build a batch mode only executable
 #
+# gdml is required rather than optional, the same way geant4/MUonE asks for it:
+# commons/GeometryExport.hh is how an example hands its detector to the Python
+# side, so a Geant4 without it is no use here. Asking for the component also
+# brings Xerces-C into the link, which is what turns a puzzling link failure into
+# a clear message at configure time.
 option(WITH_GEANT4_UIVIS "Build example with Geant4 UI and Vis drivers" ON)
 if(WITH_GEANT4_UIVIS)
-  find_package(Geant4 REQUIRED ui_all vis_all)
+  find_package(Geant4 REQUIRED ui_all vis_all gdml)
 else()
-  find_package(Geant4 REQUIRED)
+  find_package(Geant4 REQUIRED gdml)
 endif()
 include(${Geant4_USE_FILE})
 
