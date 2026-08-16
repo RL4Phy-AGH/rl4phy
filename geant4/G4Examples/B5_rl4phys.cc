@@ -25,9 +25,15 @@
 #include "Randomize.hh"
 
 #include "G4Event.hh"
+#include "G4EventManager.hh"
 #include "G4HCofThisEvent.hh"
+#include "G4ParticleDefinition.hh"
 #include "G4SDManager.hh"
+#include "G4Step.hh"
+#include "G4StepPoint.hh"
 #include "G4SystemOfUnits.hh"
+#include "G4Track.hh"
+#include "G4UserSteppingAction.hh"
 #include "G4VHitsCollection.hh"
 
 #include "GeometryExport.hh"
@@ -157,11 +163,80 @@ class GrpcEventAction : public EventAction
 };
 
 
+// The trajectories the OpenGL viewer draws, sent step by step. B5 ships no
+// stepping action of its own, so unlike B1 there is no base implementation to
+// call first.
+//
+// No volume filter, unlike MUonE/src/SteppingAction.cc: the flight through the
+// air and the curve inside the magnet are what make the picture readable, so
+// steps in the World volume are wanted too. What has to go is the shower tail
+// in the two calorimeters, thousands of soft steps per event that add nothing
+// to look at, and that is what the kinetic energy cut is for.
+class RL4PhysSteppingAction : public G4UserSteppingAction
+{
+  public:
+    RL4PhysSteppingAction(std::shared_ptr<grpc::Channel> channel, G4double minEkin)
+      : fClient(std::move(channel)), fMinEkin(minEkin)
+    {}
+
+    // One line per worker thread once the run manager tears the thread down, so
+    // the threshold can be tuned from the log without paying for it per step.
+    ~RL4PhysSteppingAction() override
+    {
+      G4cout << "Step hits sent: " << fSent << ", suppressed below "
+             << fMinEkin / MeV << " MeV: " << fSuppressed << G4endl;
+    }
+
+    void UserSteppingAction(const G4Step* step) override
+    {
+      const G4StepPoint* pre = step->GetPreStepPoint();
+
+      // A cut of 0 sends everything, since no step has a negative energy.
+      if (pre->GetKineticEnergy() < fMinEkin) {
+        ++fSuppressed;
+        return;
+      }
+
+      const G4Track* track = step->GetTrack();
+      const auto pos = pre->GetPosition();
+      const auto p = pre->GetMomentum();
+
+      // Read at the pre-step point in mm and MeV, the same convention
+      // MUonE/src/SteppingAction.cc uses, so both feed the Python side the same
+      // step_hit.
+      rl4phys::StepHit hit;
+      hit.set_x(static_cast<float>(pos.x() / mm));
+      hit.set_y(static_cast<float>(pos.y() / mm));
+      hit.set_z(static_cast<float>(pos.z() / mm));
+      hit.set_px(static_cast<float>(p.x() / MeV));
+      hit.set_py(static_cast<float>(p.y() / MeV));
+      hit.set_pz(static_cast<float>(p.z() / MeV));
+      hit.set_e_kin(static_cast<float>(pre->GetKineticEnergy() / MeV));
+      hit.set_track_id(track->GetTrackID());
+      hit.set_event_id(G4EventManager::GetEventManager()
+                         ->GetConstCurrentEvent()
+                         ->GetEventID());
+      hit.set_parent_id(track->GetParentID());
+      hit.set_pdg(track->GetDefinition()->GetPDGEncoding());
+
+      fClient.SendStepHit(hit);
+      ++fSent;
+    }
+
+  private:
+    // One client per stepping action, i.e. one per worker thread.
+    GrpcClient fClient;
+    G4double fMinEkin;
+    G4long fSent = 0;
+    G4long fSuppressed = 0;
+};
+
+
 class RL4PhysActionInitialization : public ActionInitialization
 {
   public:
-    explicit RL4PhysActionInitialization(std::shared_ptr<grpc::Channel> channel)
-      : fChannel(std::move(channel))
+    RL4PhysActionInitialization(std::shared_ptr<grpc::Channel> channel, G4double minEkin)
+      : fChannel(std::move(channel)), fMinEkin(minEkin)
     {}
 
     void BuildForMaster() const override
@@ -180,10 +255,13 @@ class RL4PhysActionInitialization : public ActionInitialization
       // RunAction books the ntuple columns that point at the vectors owned by
       // the event action, so it gets the gRPC one.
       SetUserAction(new RunAction(eventAction));
+
+      SetUserAction(new RL4PhysSteppingAction(fChannel, fMinEkin));
     }
 
   private:
     std::shared_ptr<grpc::Channel> fChannel;
+    G4double fMinEkin;
 };
 
 
@@ -197,10 +275,15 @@ int main(int argc, char** argv)
     G4cerr << "Usage:" << G4endl;
     G4cerr << "  " << argv[0]
            << " macro.mac [--threads N] [--grpc-host HOST:PORT]"
+              " [--track-min-ekin MeV]"
            << G4endl;
 
     G4cerr << "  " << argv[0]
            << " --export-gdml geometry.gdml"
+           << G4endl;
+
+    G4cerr << "    --track-min-ekin  drop step hits below this kinetic energy,"
+              " 0 sends every step (default 1.0 MeV)"
            << G4endl;
 
     return 1;
@@ -217,6 +300,10 @@ int main(int argc, char** argv)
   G4String gdmlFile = "";
 
   G4int nThreads = 1;
+
+  // The showers in the two calorimeters would otherwise drown the trajectories
+  // in soft steps, so only what is worth drawing goes out by default.
+  G4double trackMinEkin = 1.0 * MeV;
 
 
   for (int i = 1; i < argc; i++)
@@ -243,6 +330,11 @@ int main(int argc, char** argv)
     else if (std::strcmp(argv[i], "--grpc-host") == 0 && i + 1 < argc)
     {
       grpcHost = argv[++i];
+    }
+
+    else if (std::strcmp(argv[i], "--track-min-ekin") == 0 && i + 1 < argc)
+    {
+      trackMinEkin = std::atof(argv[++i]) * MeV;
     }
 
     else if (std::strcmp(argv[i], "--export-gdml") == 0 && i + 1 < argc)
@@ -327,7 +419,7 @@ int main(int argc, char** argv)
 
 
   runManager->SetUserInitialization(
-      new RL4PhysActionInitialization(channel)
+      new RL4PhysActionInitialization(channel, trackMinEkin)
   );
 
 

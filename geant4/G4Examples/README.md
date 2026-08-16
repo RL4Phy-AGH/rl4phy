@@ -20,7 +20,7 @@ The proto uses `oneof payload` — each message carries **one** data type only:
 | Payload | Example | Meaning |
 |---------|---------|---------|
 | `event_scoring` | B1 | total energy deposit in the scoring volume, per event (MeV) |
-| `step_hit` | MUonE | one step inside a detector volume |
+| `step_hit` | MUonE, B5 | one step of one track: position, momentum, kinetic energy |
 | `b5_event` | B5 | per-event summary of all six sensitive detectors |
 
 To add a new example: define a new `message` in the proto and add it to the `oneof`.
@@ -121,6 +121,29 @@ ntuple, nothing more:
 Cells are indexed `column * rows + row`, so they reshape to `(20, 4)` and
 `(10, 2)`.
 
+On top of that, one `step_hit` per step — the trajectories, the same lines
+Geant4's own OpenGL viewer draws:
+
+| Field | Meaning |
+|-------|---------|
+| `x`, `y`, `z` | pre-step point, global coordinates [mm] |
+| `px`, `py`, `pz` | momentum at the pre-step point [MeV/c] |
+| `e_kin` | kinetic energy at the pre-step point [MeV] |
+| `track_id`, `parent_id` | the track and the one that produced it (`0` for a primary) |
+| `event_id` | as above |
+| `pdg` | PDG code of the particle |
+
+The message is MUonE's, reused unchanged; the selection is not. MUonE keeps only
+the steps inside its `Station` volumes, whereas B5 sends every volume, World
+included, because the flight through the air and the curve inside the magnet are
+what make the picture readable. What that leaves are the showers in the two
+calorimeters, thousands of very soft steps per event that add nothing to look
+at, so the filter is a minimum kinetic energy instead: `--track-min-ekin <MeV>`,
+default `1.0`, `0` sends every step. Each worker thread prints how many hits it
+sent and how many the cut dropped when the run ends, so the threshold can be
+tuned from the log — on `run1.mac` in one thread the default sends 10382 and
+drops 22666, `--track-min-ekin 0` sends all 33048.
+
 ### What we added (all in `B5_rl4phys.cc`)
 
 Same rule as B1 — **subclass, never edit the example**:
@@ -132,14 +155,21 @@ Same rule as B1 — **subclass, never edit the example**:
    come from the event's hit collections, whose Ids the base class keeps private
    and this class therefore looks up once per worker thread.
 
-2. **`RL4PhysActionInitialization`** (extends `ActionInitialization`)
-   Wires the gRPC event action in. **Note:** B5's `RunAction` takes the event
+2. **`RL4PhysSteppingAction`** (extends `G4UserSteppingAction`)
+   B5 ships no stepping action of its own, so unlike B1 there is no base
+   implementation to call first. Reads the pre-step point, applies the energy
+   cut and sends `step_hit`. It holds its own `GrpcClient`, the same way the
+   event action does: `Build()` runs once per worker thread and a client is
+   never shared between them.
+
+3. **`RL4PhysActionInitialization`** (extends `ActionInitialization`)
+   Wires the two of them in. **Note:** B5's `RunAction` takes the event
    action in its constructor (its ntuple columns point at vectors the event
    action owns), so the gRPC one has to be passed there too.
 
 `main` mirrors `exampleB5.cc` — `FTFP_BERT` plus `G4StepLimiterPhysics`, same
 order — and adds batch mode, `--threads`, `--grpc-host` and `--export-gdml`,
-exactly like B1.
+exactly like B1, plus `--track-min-ekin` for the step hits.
 
 ### Build & run (Docker)
 
@@ -220,7 +250,7 @@ Two details it takes care of, both easy to get wrong by hand:
 | Example | Location | Payload |
 |---------|----------|---------|
 | B1 | `G4Examples/B1_rl4phys.cc` | `event_scoring` (own stub, not yet on `commons/GrpcClient.hh`) |
-| B5 | `G4Examples/B5_rl4phys.cc` | `b5_event` (uses `commons/GrpcClient.hh`) |
+| B5 | `G4Examples/B5_rl4phys.cc` | `b5_event` + `step_hit` (uses `commons/GrpcClient.hh`) |
 | MUonE | `geant4/MUonE/` | `step_hit` (uses `commons/GrpcClient.hh`) |
 
 ---

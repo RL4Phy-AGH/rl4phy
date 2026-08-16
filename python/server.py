@@ -1,10 +1,9 @@
 import colorsys
-import math
 import os
-import random
 import threading
 import time
 import zlib
+from collections import Counter
 from concurrent import futures
 
 import grpc
@@ -25,9 +24,22 @@ GDML_GRPC_RECEIVED_PATH = os.environ.get(
     "GDML_GRPC_RECEIVED_PATH", "/tmp/muone_received.gdml"
 )
 
-# Past this many copies on one entity the labels turn into clutter, so they stay
-# in the data but are only drawn on demand.
-MAX_LABELS_DRAWN = 8
+# Volume and particle names are always logged, but drawing them on top of the
+# geometry buries the detector as soon as a few detectors overlap on screen, so
+# nothing is drawn by default. RL4PHY_MAX_LABELS is the number of instances an
+# entity may have and still get its labels drawn: 0 turns them off, 8 restores
+# the old behaviour, a large number labels everything. The names stay in the
+# recording either way, so hovering a volume or a track in the viewer still
+# identifies it.
+MAX_LABELS_DRAWN = int(os.environ.get("RL4PHY_MAX_LABELS", "0"))
+
+# How long the stream has to stay quiet before whatever is still buffered gets
+# drawn anyway. MUonE marks no end of event, so without this its last event of a
+# run would sit in the buffer forever. Inside a run the gap between two messages
+# is milliseconds, so a second is long enough not to fire by accident, and firing
+# early costs nothing anyway: the buffer survives it and the event is drawn again
+# at the same point on the timeline once the rest of it turns up.
+TRACK_IDLE_FLUSH_S = 1.0
 
 
 def _try_load_gdml() -> list[PlacedSolid] | None:
@@ -120,80 +132,198 @@ def log_detector(solids: list[PlacedSolid]) -> None:
         rr.log(entity, archetype, static=True)
 
 
-def _random_track_color() -> list[int]:
-    r, g, b = colorsys.hsv_to_rgb(random.random(), 0.85, 1.0)
-    return [round(r * 255), round(g * 255), round(b * 255)]
+# PDG code to name and colour, for the species a B5 shower is made of. Colouring
+# by particle is what Geant4's own drawByCharge does, and for the same reason: a
+# shower is hundreds of tracks, so a colour per track carries no information,
+# while the species is what separates the electromagnetic part of the shower from
+# the hadronic one at a glance. It is also stable, where a colour drawn per track
+# made the same particle look different in every event.
+_PARTICLES: dict[int, tuple[str, list[int]]] = {
+    22: ("gamma", [255, 236, 130]),
+    11: ("e-", [90, 160, 255]),
+    -11: ("e+", [255, 130, 130]),
+    13: ("mu-", [80, 220, 210]),
+    -13: ("mu+", [255, 170, 80]),
+    211: ("pi+", [205, 140, 255]),
+    -211: ("pi-", [140, 130, 255]),
+    111: ("pi0", [190, 190, 190]),
+    2212: ("proton", [255, 120, 200]),
+    2112: ("neutron", [150, 205, 150]),
+}
 
 
-_DIRECTION_ARROW_LENGTH_MM = 30.0
-
-
-def _direction_arrow_mm(px: float, py: float, pz: float) -> list[float]:
-    magnitude = math.sqrt(px * px + py * py + pz * pz)
-    if magnitude == 0.0:
-        return [0.0, 0.0, 0.0]
-    scale = _DIRECTION_ARROW_LENGTH_MM / magnitude
-    return [px * scale, py * scale, pz * scale]
+def _particle(pdg: int) -> tuple[str, list[int]]:
+    known = _PARTICLES.get(pdg)
+    if known:
+        return known
+    # Nuclear fragments and the rarer mesons are not worth naming one by one, but
+    # they still deserve a colour that stays the same all run, so it comes off
+    # the code the same way _path_color comes off a volume path.
+    hue = (zlib.crc32(str(pdg).encode()) % 997) / 997.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 1.0)
+    return f"pdg {pdg}", [round(r * 255), round(g * 255), round(b * 255)]
 
 
 class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
     def __init__(self) -> None:
         self.msg = 0
-        self._tracks: dict[tuple[int, int], list[list[float]]] = {}
-        self._track_colors: dict[tuple[int, int], list[int]] = {}
+        # Steps are collected here and only drawn once the event they belong to
+        # is over, so a shower costs one Rerun row instead of one per step. The
+        # event is the outer key because track ids restart with every event; the
+        # pdg rides along in the inner key because it is fixed for the lifetime
+        # of a track, which saves keeping a second dictionary beside this one.
+        self._pending: dict[int, dict[tuple[int, int], list[list[float]]]] = {}
+        self._current_event: int | None = None
+        # Where each event in flight sits on the timeline, and the next free
+        # place. See _event_slot for why the event id cannot be that place.
+        self._event_slots: dict[int, int] = {}
+        self._events_seen = 0
+        # How many points an event was last drawn with, kept only for the events
+        # the idle flusher drew early, so that confirming one later can tell a
+        # picture that has grown from one that has not.
+        self._points_drawn: dict[int, int] = {}
+        # B5 marks the end of every event explicitly and MUonE does not, so which
+        # of the two rules below applies is read off the stream, not configured.
+        self._event_marker_seen = False
+        self._steps_pending_draw = False
+        self._msg_at_last_check = 0
+        # The buffers are reached from the gRPC worker and from the idle flusher
+        # thread, so everything that touches them goes through this.
+        self._lock = threading.Lock()
 
     def SendData(self, request, context):
-        self.msg += 1
-        kind = request.WhichOneof("payload")
+        with self._lock:
+            self.msg += 1
+            kind = request.WhichOneof("payload")
 
-        if kind == "event_scoring":
-            s = request.event_scoring
-            print(
-                f"[{self.msg}] B1 event_scoring: event={s.event_id} "
-                f"edep = {s.edep:.6f} MeV"
-            )
-        elif kind == "step_hit":
-            self._log_step_hit(request.step_hit)
-        elif kind == "b5_event":
-            self._log_b5_event(request.b5_event)
-        else:
-            print(f"[{self.msg}] unknown payload")
+            if kind == "event_scoring":
+                s = request.event_scoring
+                print(
+                    f"[{self.msg}] B1 event_scoring: event={s.event_id} "
+                    f"edep = {s.edep:.6f} MeV"
+                )
+            elif kind == "step_hit":
+                self._log_step_hit(request.step_hit)
+            elif kind == "b5_event":
+                self._log_b5_event(request.b5_event)
+            else:
+                print(f"[{self.msg}] unknown payload")
 
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:
-        print(
-            f"[{self.msg}] MUonE step_hit: "
-            f"event={hit.event_id} track={hit.track_id} "
-            f"parent={hit.parent_id} pdg={hit.pdg}  "
-            f"x={hit.x:.2f} y={hit.y:.2f} z={hit.z:.2f} mm  "
-            f"px={hit.px:.2f} py={hit.py:.2f} pz={hit.pz:.2f} MeV/c  "
-            f"Ekin={hit.e_kin:.2f} MeV"
-        )
+        # A step hit carrying a new event id is the only end of event MUonE ever
+        # announces, so it is what closes the one before it. B5 says so outright
+        # and its worker threads interleave events as soon as --threads is raised
+        # past one, which would make this rule fire on nearly every step, so it
+        # stands down for good once the first marker has been seen.
+        if (
+            not self._event_marker_seen
+            and self._current_event is not None
+            and self._current_event != hit.event_id
+        ):
+            self._flush_event(self._current_event, complete=True)
 
-        # Track ids restart with every event, so the event has to be part of the
-        # key (and of the entity path) to keep the polylines apart.
-        key = (hit.event_id, hit.track_id)
-        if key not in self._tracks:
-            self._tracks[key] = []
-            self._track_colors[key] = _random_track_color()
-        track = self._tracks[key]
-        color = self._track_colors[key]
+        self._current_event = hit.event_id
+        tracks = self._pending.setdefault(hit.event_id, {})
+        tracks.setdefault((hit.track_id, hit.pdg), []).append([hit.x, hit.y, hit.z])
+        self._steps_pending_draw = True
 
-        point = [hit.x, hit.y, hit.z]
-        track.append(point)
-        direction = _direction_arrow_mm(hit.px, hit.py, hit.pz)
+    # Which place on the timeline an event gets. The event id cannot be that
+    # place: Geant4 restarts it at 0 on every /run/beamOn and the wire carries no
+    # run id, so B5/run1.mac's four runs of three hand out the ids 0,1,2 four
+    # times over, and putting them on the timeline directly would leave only the
+    # last run of each standing. This counts forward instead and never repeats.
+    # The place is held until the event is drawn for the last time, so an event
+    # the idle flusher drew early is redrawn where it already was rather than
+    # somewhere new.
+    def _event_slot(self, event_id: int) -> int:
+        slot = self._event_slots.get(event_id)
+        if slot is None:
+            slot = self._event_slots[event_id] = self._events_seen
+            self._events_seen += 1
+        return slot
 
-        entity = f"world/tracks/{hit.event_id}/{hit.track_id}"
-        rr.set_time("step", sequence=self.msg)
-        rr.log(f"{entity}/points", rr.Points3D(track, colors=color))
-        rr.log(f"{entity}/line", rr.LineStrips3D([track], colors=color))
+    # Draws every track of one event in a single pass. complete says whether the
+    # event can still gain steps: when it cannot the buffer goes, when it might
+    # the buffer stays and a later call redraws the event at the same point on
+    # the timeline, where the fuller picture simply replaces this one.
+    def _flush_event(self, event_id: int, *, complete: bool) -> None:
+        tracks = self._pending.get(event_id, {})
+        total_points = sum(len(track) for track in tracks.values())
+        slot = self._event_slot(event_id)
+        if complete:
+            self._pending.pop(event_id, None)
+            self._event_slots.pop(event_id, None)
+            if self._current_event == event_id:
+                self._current_event = None
+
+        # An event the idle flusher already drew is only drawn again once it has
+        # grown, so confirming a quiet event costs nothing and the same picture
+        # does not take up two places on the slider.
+        if self._points_drawn.pop(event_id, None) == total_points:
+            return
+        if not complete:
+            self._points_drawn[event_id] = total_points
+
+        strips: list[list[list[float]]] = []
+        strip_colors: list[list[int]] = []
+        strip_labels: list[str] = []
+        points: list[list[float]] = []
+        point_colors: list[list[int]] = []
+        species: Counter[str] = Counter()
+
+        for (track_id, pdg), track in tracks.items():
+            name, color = _particle(pdg)
+            strips.append(track)
+            strip_colors.append(color)
+            strip_labels.append(f"{name} #{track_id}")
+            points.extend(track)
+            point_colors.extend([color] * len(track))
+            species[name] += 1
+
+        # Named event_index rather than event so that nobody reads a slider
+        # position as a Geant4 event number: the two only agree for the first run.
+        # The real id is logged beside the tracks below, where the viewer shows it
+        # for whatever the slider is sitting on.
+        rr.set_time("event_index", sequence=slot)
+
+        # One row for all of the event's tracks rather than an entity per track:
+        # a shower is hundreds of them, and a subtree each would bury everything
+        # else in the viewer. Both archetypes are logged even when the event is
+        # empty, since that is what clears the previous event off the screen.
+        # The polylines and the step points they are built from stay apart so the
+        # points can be switched off once they turn into fog.
         rr.log(
-            f"{entity}/direction",
-            rr.Arrows3D(origins=[point], vectors=[direction], colors=color),
+            "world/tracks/lines",
+            rr.LineStrips3D(
+                strips,
+                colors=strip_colors,
+                labels=strip_labels,
+                show_labels=len(strips) <= MAX_LABELS_DRAWN,
+            ),
+            # The number Geant4 printed for this event, which is what a person
+            # has in the other window and wants to match against. It rides with
+            # the strips instead of on a timeline of its own precisely because it
+            # repeats between runs.
+            rr.AnyValues(event_id=event_id),
+        )
+        rr.log("world/tracks/points", rr.Points3D(points, colors=point_colors))
+
+        tally = ", ".join(f"{n} {name}" for name, n in species.most_common())
+        print(
+            f"[{self.msg}] tracks: event={event_id} (index {slot})  "
+            f"{len(strips)} track(s), {len(points)} point(s)  "
+            f"[{tally}]"
         )
 
     def _log_b5_event(self, event) -> None:
+        # EndOfEventAction runs after every step of the event has been sent, so
+        # this is the exact moment the event's tracks are complete, and it stays
+        # exact however many worker threads B5 was started with.
+        self._event_marker_seen = True
+        self._flush_event(event.event_id, complete=True)
+
         # The calorimeter cells arrive one value per cell and most of them are
         # empty, so print the totals the way B5's own EndOfEventAction does.
         chamber_hits = ", ".join(str(n) for n in event.drift_chamber_hits)
@@ -210,6 +340,21 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             f"Had edep = {sum(event.had_cal_edep):.6f} MeV "
             f"in {len(event.had_cal_edep)} cells"
         )
+
+    # Runs on the idle flusher thread. The last event of a MUonE run is followed
+    # by no marker and by no further step hit, so the one thing left that can say
+    # it is over is the stream falling quiet.
+    def flush_quiet_tracks(self) -> None:
+        with self._lock:
+            if self.msg != self._msg_at_last_check:
+                # Still arriving, so whatever is buffered is not finished yet.
+                self._msg_at_last_check = self.msg
+                return
+            if not self._steps_pending_draw:
+                return
+            self._steps_pending_draw = False
+            for event_id in list(self._pending):
+                self._flush_event(event_id, complete=False)
 
     def SendGeometry(self, request, context):
         # Geometry hand-off (issue #18): Geant4 ships the exported GDML over
@@ -231,6 +376,12 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         return rl4phy_pb2.Reply()
 
 
+def watch_and_flush_tracks(servicer: AgentServer) -> None:
+    while True:
+        time.sleep(TRACK_IDLE_FLUSH_S)
+        servicer.flush_quiet_tracks()
+
+
 def start_server():
     server_uri = rr.serve_grpc(grpc_port=RERUN_GRPC_PORT)
     print(f"Rerun gRPC server on port {RERUN_GRPC_PORT} ({server_uri})")
@@ -241,16 +392,21 @@ def start_server():
 
     # GrpcClient::SendStepHit (C++) doesn't retry, so this port must be open
     # before the GDML wait below, not after.
-    # max_workers=1 is load-bearing: the servicer's counters and dicts are
-    # unsynchronized and Rerun's global step sequence assumes handlers run one at
-    # a time. Raising it requires adding locks first.
+    # max_workers=1 is still what the handlers are written for: SendData does all
+    # of its work holding AgentServer's lock, which the track flusher below also
+    # takes, so a second worker would only ever queue up behind it. The lock is
+    # there for that flusher, not to make the handlers concurrent.
+    servicer = AgentServer()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
-    rl4phy_pb2_grpc.add_SendServiceServicer_to_server(AgentServer(), server)
+    rl4phy_pb2_grpc.add_SendServiceServicer_to_server(servicer, server)
     server.add_insecure_port("0.0.0.0:50051")
     server.start()
     print("Listening on port 50051, waiting for Geant4 data...")
 
     threading.Thread(target=watch_and_log_geometry, daemon=True).start()
+    threading.Thread(
+        target=watch_and_flush_tracks, args=(servicer,), daemon=True
+    ).start()
 
     server.wait_for_termination()
 
