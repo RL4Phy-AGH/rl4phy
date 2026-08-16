@@ -88,8 +88,11 @@ message Data
 
 message Reply {}
 
-// One-off geometry hand-off (issue #18): the exported GDML is sent once at
-// startup, before any step data.
+// Geometry hand-off (issue #18): the exported GDML, sent at the start of every
+// /run/beamOn and before that run's event data. Once per run rather than once
+// per job because a UI command can move the detector between runs, as B5's
+// /B5/detector/armAngle does three times over B5/run1.mac; a single hand-off
+// would leave most of a run's events drawn on a detector they never saw.
 message GeometryFile
 {
     bytes gdml = 1;

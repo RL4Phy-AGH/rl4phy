@@ -174,15 +174,29 @@ Same rule as B1 — **subclass, never edit the example**:
    `Build()` runs once per worker thread and a client is never shared between
    them.
 
-2. **`RL4PhysActionInitialization`** (extends `ActionInitialization`)
-   Wires it in. **Note:** B5's `RunAction` takes the event action in its
+2. **`GrpcRunAction`** (extends `RunAction`)
+   Runs B5's own begin-of-run logic first, then hands the geometry over with
+   `GeometryExport::SendForRun()`. It has to be per run rather than once from
+   `main`, because B5's detector moves: `/B5/detector/armAngle` rotates the
+   second arm and shifts it five metres, three times over `run1.mac`, so a
+   geometry sent before the macro would leave nine of its twelve events drawn on
+   a detector they were never produced in. The send happens on the master thread
+   only — that is `SendForRun`'s doing, not this class's — so `run1.mac` puts
+   four geometry messages on the wire whether it runs on one thread or on eight,
+   each of them ahead of its own run's first event.
+
+3. **`RL4PhysActionInitialization`** (extends `ActionInitialization`)
+   Wires both in. **Note:** B5's `RunAction` takes the event action in its
    constructor (its ntuple columns point at vectors the event action owns), so
-   the gRPC one has to be passed there too.
+   the gRPC one has to be passed there too. It also overrides `BuildForMaster()`,
+   which B5's own version fills with a run action: the master is the thread that
+   ships the geometry, so leaving it with the plain one would mean none is ever
+   sent.
 
 `main` mirrors `exampleB5.cc` — `FTFP_BERT` plus `G4StepLimiterPhysics`, same
 order — and adds batch mode, `--threads`, `--grpc-host` and `--export-gdml`,
-exactly like B1. It also calls `TrajectoryStream::Enable()` next to the geometry
-hand-off: a batch run stores no trajectories unless something asks for them,
+exactly like B1. It also calls `TrajectoryStream::Enable()` before the macro:
+a batch run stores no trajectories unless something asks for them,
 and interactively it is the vis system that asks. The call goes through
 `/tracking/storeTrajectory`, which is per thread, so it is applied on the master
 and `G4MTRunManager` replays it on every worker — the same route the vis manager
@@ -205,6 +219,13 @@ docker compose logs python
 X (MeV)` for every event; the sum of `em_cal_edep` in the matching `b5_event`
 must be the same number. On the last event of `run1.mac` both read
 123.801 MeV.
+
+The geometry is worth checking separately, because it is the one thing that
+changes mid-macro: `run1.mac` prints `Geometry sent over gRPC: N bytes` four
+times, once per `/run/beamOn` and never once per worker, and the four GDMLs
+differ only in `fSecondArmPhys` — `y="30"`, then no rotation at all and
+`z="5000"` for 0 deg, then 60 and 30 again, each with the matching
+`(-5 m sin a, 0, 5 m cos a)` position.
 
 ### CMake note
 
@@ -248,9 +269,10 @@ Two details it takes care of, both easy to get wrong by hand:
 ## Checklist for the next example
 
 0. **Geometry and trajectories are already done.** They are the same for every
-   example, so they live in `commons/` and cost two calls, no new code:
-   `GeometryExport::SendOverGrpc(client)` and `TrajectoryStream::Enable()` in
-   `main`, `TrajectoryStream::SendEvent(client, event)` at end of event. Only the
+   example, so they live in `commons/` and cost three calls, no new code:
+   `TrajectoryStream::Enable()` in `main`,
+   `GeometryExport::SendForRun(client)` at begin of run and
+   `TrajectoryStream::SendEvent(client, event)` at end of event. Only the
    example-specific scoring is left to write.
 1. **Understand the original scoring** — per step, event, or run? Which volume?
 2. **Extend the proto** — new `message` + new `oneof` arm (do not break existing ones).

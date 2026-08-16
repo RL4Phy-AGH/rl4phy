@@ -27,10 +27,10 @@ services:
     ports:
       - "50051:50051"
       - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
-    environment:
-      GDML_EXPORT_PATH: *gdml_export_path
-    volumes:
-      - gdml_export:/export:ro
+    # No /export mount: geometry arrives over gRPC at the start of every run, so
+    # the receiver has no reason to read a file. The volume only ever held the
+    # MUonE detector anyway, because docker-entrypoint.sh writes it and the other
+    # examples are launched past that entrypoint.
 
   geant:
     build:

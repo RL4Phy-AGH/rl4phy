@@ -71,22 +71,49 @@ public:
     Send(packet);
   }
 
-  // One-off geometry hand-off (issue #18). Unlike the per-step calls this one
-  // waits for the server: geometry is sent once at startup and the Python side
-  // may still be coming up.
+  // Geometry hand-off (issue #18), once per run - see
+  // GeometryExport::SendForRun. Unlike the per-step calls this one waits for the
+  // server, because the first of them goes out before the first event of the
+  // job and the Python side may still be coming up.
+  //
+  // Only the first one waits, though. Once a send has failed, the receiver has
+  // had its thirty seconds and is not there; a run of B5/run1.mac with nothing
+  // listening spent two minutes in this function rather than thirty seconds,
+  // which reads like a broken build to anyone working on the Geant4 half alone.
+  // What goes is the waiting, not the attempt: every later run still calls, so
+  // a receiver that turns up in the meantime gets the geometry of the runs
+  // after it, only now the call fails at the speed of a refused connection
+  // instead of stalling the run.
+  //
+  // The latch is a plain member rather than a static: a client belongs to one
+  // thread, and since only the master sends geometry, one client does all the
+  // sending for a job. A caller that builds a fresh client per run instead gets
+  // a fresh latch with it and would wait thirty seconds every run again, so a
+  // run action holds its client for as long as it lives - which is what B5's
+  // GrpcRunAction and MUonE's RunAction do.
   bool SendGeometry(const std::string& gdmlContent) {
     rl4phys::GeometryFile packet;
     packet.set_gdml(gdmlContent);
 
     rl4phys::Reply reply;
     grpc::ClientContext context;
-    context.set_wait_for_ready(true);
+    context.set_wait_for_ready(!fGeometryFailed);
     context.set_deadline(std::chrono::system_clock::now() +
                          std::chrono::seconds(30));
     const grpc::Status status = fStub->SendGeometry(&context, packet, &reply);
     if (!status.ok()) {
-      std::cerr << "SendGeometry failed: " << status.error_message()
-                << std::endl;
+      // Not suppressed after the first the way the per-step failures are:
+      // geometry is what everything else is drawn on, so a run that lost it has
+      // to say so. The first line carries the reason and the second one does
+      // not repeat it, which keeps three later lines from burying it.
+      if (!fGeometryFailed) {
+        fGeometryFailed = true;
+        std::cerr << "SendGeometry failed: " << status.error_message()
+                  << "; later runs will not wait for a receiver." << std::endl;
+      } else {
+        std::cerr << "SendGeometry failed again: this run's geometry reached "
+                     "nobody." << std::endl;
+      }
     }
     return status.ok();
   }
@@ -111,4 +138,5 @@ private:
 
   std::unique_ptr<rl4phys::SendService::Stub> fStub;
   bool fWarned = false;
+  bool fGeometryFailed = false;
 };

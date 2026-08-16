@@ -166,6 +166,36 @@ class GrpcEventAction : public EventAction
 };
 
 
+// B5 does not keep one detector for the whole job: /B5/detector/armAngle turns
+// the second arm between runs, three times over run1.mac, so the geometry has
+// to go out once per run rather than once at startup - see
+// GeometryExport::SendForRun, which is also where the master-only guard lives.
+// Same shape as GrpcEventAction above: the example's own action runs first and
+// this one only adds the send.
+class GrpcRunAction : public RunAction
+{
+  public:
+    GrpcRunAction(EventAction* eventAction, std::shared_ptr<grpc::Channel> channel)
+      : RunAction(eventAction), fClient(std::move(channel))
+    {}
+
+    void BeginOfRunAction(const G4Run* run) override
+    {
+      RunAction::BeginOfRunAction(run);
+
+      // Nothing to report on a worker thread, where SendForRun sends nothing.
+      if (auto sent = GeometryExport::SendForRun(fClient)) {
+        G4cout << "Geometry sent over gRPC: " << sent << " bytes" << G4endl;
+      }
+    }
+
+  private:
+    // One client per run action, i.e. one per thread, the same rule the event
+    // action follows.
+    GrpcClient fClient;
+};
+
+
 class RL4PhysActionInitialization : public ActionInitialization
 {
   public:
@@ -175,8 +205,15 @@ class RL4PhysActionInitialization : public ActionInitialization
 
     void BuildForMaster() const override
     {
-      // The master thread runs no event, so it needs no gRPC client.
-      ActionInitialization::BuildForMaster();
+      // The body of B5's own BuildForMaster() rather than a call to it: that
+      // one sets B5::RunAction and SetUserAction would only drop it again for
+      // ours. The event action it builds is the master's, which runs no event -
+      // it is there because RunAction's ntuple columns point at its vectors.
+      //
+      // The master is not optional here. It is the only thread that ships the
+      // geometry, so leaving it with the example's plain run action would mean
+      // none is ever sent.
+      SetUserAction(new GrpcRunAction(new EventAction, fChannel));
     }
 
     void Build() const override
@@ -188,7 +225,7 @@ class RL4PhysActionInitialization : public ActionInitialization
 
       // RunAction books the ntuple columns that point at the vectors owned by
       // the event action, so it gets the gRPC one.
-      SetUserAction(new RunAction(eventAction));
+      SetUserAction(new GrpcRunAction(eventAction, fChannel));
 
       // No stepping action: the trajectories go out from the event action, out
       // of the container Geant4 fills for its own viewer.
@@ -379,30 +416,6 @@ int main(int argc, char** argv)
     delete runManager;
 
     return written ? 0 : 1;
-  }
-
-
-
-  // ------------------------------------------------------------
-  // Geometry hand-off
-  //
-  // Every run opens by shipping its geometry to the Python side, so the
-  // event data that follows has something to be drawn on. Independent of
-  // --export-gdml above, which is only an on-disk copy for us to look at.
-  // ------------------------------------------------------------
-
-  {
-    GrpcClient geometryClient(channel);
-
-
-    if (auto sent = GeometryExport::SendOverGrpc(geometryClient))
-    {
-      G4cout
-          << "Geometry sent over gRPC: "
-          << sent
-          << " bytes"
-          << G4endl;
-    }
   }
 
 

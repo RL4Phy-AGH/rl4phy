@@ -59,22 +59,13 @@ int main(int argc, char** argv) {
   runManager->Initialize();
 
 #ifdef RL4PHY_ENABLE_GDML
-  // An explicit on-disk copy, only when asked for.
+  // An explicit on-disk copy, only when asked for. The hand-off to the Python
+  // side is not here: it belongs to a run, so RunAction::BeginOfRunAction does
+  // it, once per /run/beamOn.
   if (!exportGdml.empty() &&
       GeometryExport::WriteToFile(exportGdml, detector->GetWorldPV())) {
     std::cout << "GDML EXPORTED: " << exportGdml << std::endl;
   }
-
-#ifdef RL4PHY_ENABLE_GRPC
-  // Geometry hand-off (issue #18): every run ships its geometry to the Python
-  // side over the same channel the steps use, whether or not a copy was written
-  // to disk above.
-  if (grpcClient) {
-    if (auto sent = GeometryExport::SendOverGrpc(*grpcClient, detector->GetWorldPV())) {
-      std::cout << "GDML SENT OVER GRPC: " << sent << " bytes" << std::endl;
-    }
-  }
-#endif
 #else
   if (!gdmlFile.empty() || !exportGdml.empty()) {
     std::cerr << "GDML support is not available in this build."

@@ -8,6 +8,7 @@
 
 #include "G4GDMLParser.hh"
 #include "G4Navigator.hh"
+#include "G4Threading.hh"
 #include "G4TransportationManager.hh"
 
 #include <cstddef>
@@ -28,6 +29,7 @@
 // the way out is unavoidable. Everything around it lives here so that no entry
 // point has to know about it:
 //
+//   GeometryExport::SendForRun(client)     from BeginOfRunAction, once per run
 //   GeometryExport::SendOverGrpc(client)   write, send, clean up
 //   GeometryExport::WriteToFile(path)      explicit on-disk export
 //
@@ -129,6 +131,42 @@ inline std::size_t SendOverGrpc(GrpcClient& client, const G4VPhysicalVolume* wor
   }
 
   return client.SendGeometry(gdml) ? gdml.size() : 0;
+}
+
+// The same hand-off, once per /run/beamOn, called from an example's own
+// G4UserRunAction::BeginOfRunAction. Sending once before the macro instead is
+// only right for a detector that never moves, and B5's does: its
+// /B5/detector/armAngle rotates the second arm and moves it five metres
+// (B5/src/DetectorConstruction.cc, SetArmAngle), three times over the course of
+// B5/run1.mac. A geometry shipped before that macro would leave nine of its
+// twelve events drawn on a detector they were never produced in - nothing
+// fails, the picture is just wrong. A begin-of-run send picks up whatever a UI
+// command changed between runs.
+//
+// A free function rather than a base class the way TrajectoryStream is one:
+// every example already has a G4UserRunAction of its own to extend, and a
+// second base class would collide with it.
+//
+// The thread guard is what this adds over SendOverGrpc. BeginOfRunAction fires
+// on the master and on every worker, so four workers would each send their own
+// copy of the same tens of kilobytes, every run. The master is the right one to
+// keep: it is the thread the macro runs on, so the placements it sees are the
+// ones the UI command just changed (G4VPhysicalVolume keeps its translation and
+// rotation per thread), and its BeginOfRunAction runs before G4MTRunManager
+// releases the workers, which is what gets the geometry on the wire ahead of
+// the first event of the run it belongs to. A sequential run manager reports as
+// the master too - its thread id stays G4Threading::MASTER_ID - so the same
+// call is right in a single-threaded application, where it is the only thread
+// there is.
+//
+// Returns 0 on a worker, which is also what a failed send returns; a caller
+// that logs only a non-zero result therefore stays quiet on the workers, which
+// is what it wants.
+inline std::size_t SendForRun(GrpcClient& client, const G4VPhysicalVolume* world = nullptr)
+{
+  if (!G4Threading::IsMasterThread()) return 0;
+
+  return SendOverGrpc(client, world);
 }
 
 #endif  // RL4PHY_ENABLE_GRPC

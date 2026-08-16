@@ -14,6 +14,12 @@ C++; GDML is the export, not the source.
   the middle one rotated 30 deg (stereo). `BuildFromGDML()` stays as an import path.
 - `main.cc`: flags `--export-gdml <file>` (write geometry to GDML),
   `--gdml <file>` (import instead of the C++ build), `--vis [macro]`, `<macro>`.
+- `src/RunAction.*`: prints the `STEP` column header, and hands the geometry to
+  the Python side once per `/run/beamOn` via `commons/GeometryExport.hh`. Per run
+  and not once from `main` because the geometry is what the run's tracks get
+  drawn on, and a UI command between runs can have moved it — B5 next door has
+  exactly such a command. `GeometryExport::SendForRun()` sends on the master
+  thread only, which here is the only thread there is.
 - `src/SteppingAction.*`: one `STEP` line per step with the track's position,
   momentum, energy, time and the process (column header from `RunAction`).
   Console only, and still only the steps inside the `Station` volumes.
@@ -24,9 +30,11 @@ C++; GDML is the export, not the source.
   next to the OpenGL one. Prints `TRAJECTORIES <eventID> <count>`.
 - `macros/`: `run.mac` (mu- 160 GeV beam), `vis.mac` (OpenGL view).
 
-The trajectories only go out when `--grpc-host` is given, which is also when
-`main` switches trajectory storage on: a batch run keeps none by default, and in
-`--vis` mode the vis system asks for them itself.
+The trajectories and the geometry only go out when `--grpc-host` is given, which
+is also when `main` switches trajectory storage on: a batch run keeps none by
+default, and in `--vis` mode the vis system asks for them itself. `--export-gdml`
+is separate: it is an on-disk copy and needs no receiver, and an export-only run
+never beams, so it sends nothing.
 
 ### Build (Windows, Geant4 11.3 with GDML + Xerces via vcpkg)
 

@@ -1,4 +1,5 @@
 import colorsys
+import hashlib
 import os
 import threading
 import time
@@ -18,9 +19,6 @@ import rl4phy_pb2_grpc
 from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid, parse_gdml
 
 RERUN_GRPC_PORT = 9876
-
-GDML_EXPORT_PATH = os.environ.get("GDML_EXPORT_PATH", "/export/muone.gdml")
-GDML_POLL_INTERVAL_S = 1.0
 
 # Where the GDML received over gRPC (issue #18) is dumped before parsing.
 GDML_GRPC_RECEIVED_PATH = os.environ.get(
@@ -45,28 +43,39 @@ MAX_LABELS_DRAWN = int(os.environ.get("RL4PHY_MAX_LABELS", "0"))
 TRACK_IDLE_FLUSH_S = 1.0
 
 
-def _try_load_gdml() -> list[PlacedSolid] | None:
-    if not os.path.exists(GDML_EXPORT_PATH):
-        return None
-    try:
-        solids = parse_gdml(GDML_EXPORT_PATH)
-    except Exception as exc:  # Geant4 may still be mid-write; retry.
-        print(f"GDML at {GDML_EXPORT_PATH} not ready yet ({exc!r}), retrying...")
-        return None
-    if not solids:
-        print(f"GDML at {GDML_EXPORT_PATH} has no drawable volumes yet, retrying...")
-        return None
+# Geometries already parsed, keyed by a digest of the GDML they came from.
+# Geant4 hands its geometry over once per /run/beamOn rather than once per
+# session, and parsing is the larger half of receiving one: pyg4ometry takes
+# 34 ms to expand B5's file into its 976 placements, against 11 ms to log that
+# same list to Rerun. A macro that returns to a setting it already used, as
+# B5/run1.mac does, then pays only the 11 ms. The key is the bytes themselves,
+# so this needs to know nothing about what a producer varied between two runs.
+_PARSED_GDML: dict[str, list[PlacedSolid]] = {}
+
+# Bounded because a producer that moved its detector every run would otherwise
+# grow this for as long as the process lived; the oldest entry goes first. Eight
+# is well past the three distinct geometries a macro like B5/run1.mac visits.
+_PARSED_GDML_MAX = 8
+
+
+def _parse_received_gdml(gdml: bytes) -> list[PlacedSolid]:
+    """The solids for one received GDML, parsed at most once per distinct file."""
+    # Written on every arrival, cached or not, so the file left on disk is always
+    # the geometry currently on screen rather than the last one that missed. It
+    # is also what pyg4ometry reads from, since it takes a path and not bytes.
+    with open(GDML_GRPC_RECEIVED_PATH, "wb") as gdml_file:
+        gdml_file.write(gdml)
+
+    digest = hashlib.sha256(gdml).hexdigest()
+    cached = _PARSED_GDML.get(digest)
+    if cached is not None:
+        return cached
+
+    solids = parse_gdml(GDML_GRPC_RECEIVED_PATH)
+    if len(_PARSED_GDML) >= _PARSED_GDML_MAX:
+        del _PARSED_GDML[next(iter(_PARSED_GDML))]
+    _PARSED_GDML[digest] = solids
     return solids
-
-
-def watch_and_log_geometry() -> None:
-    while True:
-        solids = _try_load_gdml()
-        if solids:
-            print(f"Loaded {len(solids)} volume(s) from GDML: {GDML_EXPORT_PATH}")
-            log_detector(solids)
-            return
-        time.sleep(GDML_POLL_INTERVAL_S)
 
 
 def _path_color(path: str) -> list[int]:
@@ -76,8 +85,25 @@ def _path_color(path: str) -> list[int]:
     return [round(r * 255), round(g * 255), round(b * 255)]
 
 
-def log_detector(solids: list[PlacedSolid]) -> None:
-    rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
+# Every entity the geometry on screen occupies. The next geometry logs straight
+# over the entities the two have in common, but Rerun leaves the rest standing
+# for the whole recording unless they are cleared. A session that ran MUonE and
+# then B5 shares not one volume path between the two, and that is the session
+# flush_quiet_tracks below already has to survive, so without this the second
+# detector would simply be drawn on top of the first. Only entities logged from
+# here are ever cleared, so world/tracks is never touched.
+_geometry_entities: set[str] = set()
+
+
+def log_detector(solids: list[PlacedSolid], slot: int) -> None:
+    # Geometry belongs on the same timeline as the tracks, not outside time,
+    # because B5 rebuilds its detector mid session: /B5/detector/armAngle rotates
+    # the second arm and moves it five metres, and the geometry is handed over
+    # again at the start of every run. Logged statically, whichever geometry
+    # arrived last would be the one the whole recording was drawn on, so
+    # scrubbing back to an early event would put its tracks on a detector that
+    # was not there yet. The slot is the caller's; see SendGeometry for why.
+    rr.set_time("event_index", sequence=slot)
 
     # One entity per volume path rather than per placement: B5's hadronic
     # calorimeter alone is 800 boxes, and batching them keeps the Rerun tree
@@ -85,6 +111,16 @@ def log_detector(solids: list[PlacedSolid]) -> None:
     groups: dict[tuple[str, str], list[PlacedSolid]] = {}
     for solid in solids:
         groups.setdefault((solid.path, type(solid).__name__), []).append(solid)
+
+    entities = {f"world/{path}" for path, _ in groups}
+    # Flat rather than recursive: the world volume is an ancestor of every other
+    # entity here, so a recursive clear aimed at it would reach the ones this
+    # same geometry is about to fill. Every stale path is known by name anyway,
+    # so clearing them one at a time costs nothing and touches nothing else.
+    for gone in _geometry_entities - entities:
+        rr.log(gone, rr.Clear(recursive=False))
+    _geometry_entities.clear()
+    _geometry_entities.update(entities)
 
     for (path, _), group in groups.items():
         color = _path_color(path)
@@ -108,7 +144,6 @@ def log_detector(solids: list[PlacedSolid]) -> None:
                     translations=[s.center_mm for s in group],
                     quaternions=[s.quaternion_xyzw for s in group],
                 ),
-                static=True,
             )
             continue
 
@@ -132,7 +167,7 @@ def log_detector(solids: list[PlacedSolid]) -> None:
                 half_sizes=[s.half_size_mm for s in group],
                 **shared,
             )
-        rr.log(entity, archetype, static=True)
+        rr.log(entity, archetype)
 
 
 # PDG code to name and colour, for the species a B5 shower is made of. This
@@ -486,20 +521,39 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
     def SendGeometry(self, request, context):
         # Geometry hand-off (issue #18): Geant4 ships the exported GDML over
         # gRPC, so the shared volume is no longer required to see the stations.
-        print(f"Received GDML over gRPC: {len(request.gdml)} bytes")
-        try:
-            with open(GDML_GRPC_RECEIVED_PATH, "wb") as gdml_file:
-                gdml_file.write(request.gdml)
-            solids = parse_gdml(GDML_GRPC_RECEIVED_PATH)
-        except Exception as exc:
-            print(f"Could not parse the GDML received over gRPC: {exc!r}")
-            return rl4phy_pb2.Reply()
+        # It arrives once per /run/beamOn rather than once per session, because a
+        # macro is free to move the detector between two runs, and B5/run1.mac
+        # does exactly that three times over.
+        #
+        # The lock is taken for the same reason SendData takes it: _events_seen
+        # below is also advanced by the idle flusher thread.
+        with self._lock:
+            print(f"Received GDML over gRPC: {len(request.gdml)} bytes")
+            try:
+                solids = _parse_received_gdml(request.gdml)
+            except Exception as exc:
+                print(f"Could not parse the GDML received over gRPC: {exc!r}")
+                return rl4phy_pb2.Reply()
 
-        if solids:
-            print(f"Loaded {len(solids)} volume(s) from gRPC GDML")
-            log_detector(solids)
-        else:
-            print("GDML received over gRPC has no drawable volumes")
+            if not solids:
+                print("GDML received over gRPC has no drawable volumes")
+                return rl4phy_pb2.Reply()
+
+            # The place the next event will take, which is where geometry has to
+            # land for Rerun's latest-at lookup to pair every event with the
+            # detector it was simulated on: this run's events sit at this slot
+            # and after it, and the runs before it end before it. Geometry always
+            # arrives ahead of the first event of its run, so the slot is still
+            # free when this reads it.
+            #
+            # Logged on every arrival, even when the bytes are ones already
+            # parsed. B5/run1.mac ends at the arm angle it started at, so its
+            # last geometry is byte for byte its first, and skipping the log
+            # would leave that run's three events resolving back to the 60 degree
+            # geometry of the run before them.
+            slot = self._events_seen
+            print(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
+            log_detector(solids, slot)
         return rl4phy_pb2.Reply()
 
 
@@ -517,8 +571,11 @@ def start_server():
         f"rerun --connect rerun+http://127.0.0.1:{RERUN_GRPC_PORT}/proxy"
     )
 
-    # GrpcClient::SendStepHit (C++) doesn't retry, so this port must be open
-    # before the GDML wait below, not after.
+    # Logged here rather than with the geometry, because it is a property of the
+    # recording and not of any one detector, and because a producer that sends no
+    # geometry at all should still get its tracks drawn the right way up.
+    rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
+
     # max_workers=1 is still what the handlers are written for: SendData does all
     # of its work holding AgentServer's lock, which the track flusher below also
     # takes, so a second worker would only ever queue up behind it. The lock is
@@ -530,7 +587,6 @@ def start_server():
     server.start()
     print("Listening on port 50051, waiting for Geant4 data...")
 
-    threading.Thread(target=watch_and_log_geometry, daemon=True).start()
     threading.Thread(
         target=watch_and_flush_tracks, args=(servicer,), daemon=True
     ).start()
