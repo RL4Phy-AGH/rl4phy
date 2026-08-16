@@ -4,6 +4,7 @@ import os
 import random
 import threading
 import time
+import zlib
 from concurrent import futures
 
 import grpc
@@ -12,7 +13,7 @@ import rerun as rr
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
-from gdml_geometry import StationGeometry, parse_gdml
+from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid, parse_gdml
 
 RERUN_GRPC_PORT = 9876
 
@@ -24,47 +25,99 @@ GDML_GRPC_RECEIVED_PATH = os.environ.get(
     "GDML_GRPC_RECEIVED_PATH", "/tmp/muone_received.gdml"
 )
 
-STATION_COLOR = [51, 153, 255]
+# Past this many copies on one entity the labels turn into clutter, so they stay
+# in the data but are only drawn on demand.
+MAX_LABELS_DRAWN = 8
 
 
-def _try_load_gdml() -> list[StationGeometry] | None:
+def _try_load_gdml() -> list[PlacedSolid] | None:
     if not os.path.exists(GDML_EXPORT_PATH):
         return None
     try:
-        stations = parse_gdml(GDML_EXPORT_PATH)
+        solids = parse_gdml(GDML_EXPORT_PATH)
     except Exception as exc:  # Geant4 may still be mid-write; retry.
         print(f"GDML at {GDML_EXPORT_PATH} not ready yet ({exc!r}), retrying...")
         return None
-    if not stations:
-        print(f"GDML at {GDML_EXPORT_PATH} has no box-shaped stations yet, retrying...")
+    if not solids:
+        print(f"GDML at {GDML_EXPORT_PATH} has no drawable volumes yet, retrying...")
         return None
-    return stations
+    return solids
 
 
 def watch_and_log_geometry() -> None:
     while True:
-        stations = _try_load_gdml()
-        if stations:
-            print(f"Loaded {len(stations)} station(s) from GDML: {GDML_EXPORT_PATH}")
-            log_detector(stations)
+        solids = _try_load_gdml()
+        if solids:
+            print(f"Loaded {len(solids)} volume(s) from GDML: {GDML_EXPORT_PATH}")
+            log_detector(solids)
             return
         time.sleep(GDML_POLL_INTERVAL_S)
 
 
-def log_detector(stations: list[StationGeometry]) -> None:
+def _path_color(path: str) -> list[int]:
+    # Stable across runs, unlike hash(), so a subdetector keeps its colour.
+    hue = (zlib.crc32(path.encode()) % 997) / 997.0
+    r, g, b = colorsys.hsv_to_rgb(hue, 0.55, 0.95)
+    return [round(r * 255), round(g * 255), round(b * 255)]
+
+
+def log_detector(solids: list[PlacedSolid]) -> None:
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
-    rr.log(
-        "world/stations",
-        rr.Boxes3D(
-            centers=[s.center_mm for s in stations],
-            half_sizes=[s.half_size_mm for s in stations],
-            quaternions=[s.quaternion_xyzw for s in stations],
-            colors=STATION_COLOR,
-            labels=[s.name for s in stations],
-            fill_mode="solid",
-        ),
-        static=True,
-    )
+
+    # One entity per volume path rather than per placement: B5's hadronic
+    # calorimeter alone is 800 boxes, and batching them keeps the Rerun tree
+    # something a human can fold open.
+    groups: dict[tuple[str, str], list[PlacedSolid]] = {}
+    for solid in solids:
+        groups.setdefault((solid.path, type(solid).__name__), []).append(solid)
+
+    for (path, _), group in groups.items():
+        color = _path_color(path)
+        entity = f"world/{path}"
+
+        if isinstance(group[0], PlacedMesh):
+            # Every copy at one path is the same solid, so the mesh is logged
+            # once and the copies become poses on top of it.
+            template = group[0]
+            # Meshes have no wireframe mode, so an envelope that is not a box or
+            # a plain tube is made translucent instead of being drawn as a cage.
+            alpha = 70 if template.is_container else 255
+            rr.log(
+                entity,
+                rr.Mesh3D(
+                    vertex_positions=template.local_vertices_mm,
+                    triangle_indices=template.triangles,
+                    albedo_factor=[*color, alpha],
+                ),
+                rr.InstancePoses3D(
+                    translations=[s.center_mm for s in group],
+                    quaternions=[s.quaternion_xyzw for s in group],
+                ),
+                static=True,
+            )
+            continue
+
+        shared = {
+            "centers": [s.center_mm for s in group],
+            "quaternions": [s.quaternion_xyzw for s in group],
+            "colors": color,
+            "labels": [f"{s.name} #{s.copy_number}" for s in group],
+            "show_labels": len(group) <= MAX_LABELS_DRAWN,
+            # Envelopes are drawn as cages so they do not hide what they hold.
+            "fill_mode": "majorwireframe" if group[0].is_container else "solid",
+        }
+        if isinstance(group[0], PlacedCylinder):
+            archetype = rr.Cylinders3D(
+                lengths=[s.length_mm for s in group],
+                radii=[s.radius_mm for s in group],
+                **shared,
+            )
+        else:
+            archetype = rr.Boxes3D(
+                half_sizes=[s.half_size_mm for s in group],
+                **shared,
+            )
+        rr.log(entity, archetype, static=True)
 
 
 def _random_track_color() -> list[int]:
@@ -165,16 +218,16 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         try:
             with open(GDML_GRPC_RECEIVED_PATH, "wb") as gdml_file:
                 gdml_file.write(request.gdml)
-            stations = parse_gdml(GDML_GRPC_RECEIVED_PATH)
+            solids = parse_gdml(GDML_GRPC_RECEIVED_PATH)
         except Exception as exc:
             print(f"Could not parse the GDML received over gRPC: {exc!r}")
             return rl4phy_pb2.Reply()
 
-        if stations:
-            print(f"Loaded {len(stations)} station(s) from gRPC GDML")
-            log_detector(stations)
+        if solids:
+            print(f"Loaded {len(solids)} volume(s) from gRPC GDML")
+            log_detector(solids)
         else:
-            print("GDML received over gRPC has no box-shaped stations")
+            print("GDML received over gRPC has no drawable volumes")
         return rl4phy_pb2.Reply()
 
 
