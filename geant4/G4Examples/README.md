@@ -162,19 +162,18 @@ neither is fine.
 | scoring + the picture Geant4's viewer would draw | add `TrajectoryStream::Enable()` in `main` and `SendEvent()` in `EndOfEventAction` |
 | the picture and no scoring of your own | both of the above and no new proto message — this is what `geant4/MUonE/` does |
 
-What each omission costs is in [the table under the
-template](#what-happens-if-you-leave-a-line-out).
+What each omission costs is in [the table under the template](#what-happens-if-you-leave-a-line-out).
 
 ## The payload: extending the proto
 
 The proto uses `oneof payload` — each message carries one data type:
 
-| Payload | Example | Meaning |
-|---------|---------|---------|
-| `event_scoring` | B1 | total energy deposit in the scoring volume, per event (MeV) |
-| `event_trajectories` | MUonE, B5 | every trajectory of one event: the polylines Geant4's viewer draws |
-| `b5_event` | B5 | per-event summary of all six sensitive detectors |
-| `step_hit` | — | one step of one track. Nothing sends it any more; kept as the only way to get per-step kinematics over the wire |
+| Payload              | Example   | Meaning                                                                                                         |
+| -------------------- | --------- | --------------------------------------------------------------------------------------------------------------- |
+| `event_scoring`      | B1        | total energy deposit in the scoring volume, per event (MeV)                                                     |
+| `event_trajectories` | MUonE, B5 | every trajectory of one event: the polylines Geant4's viewer draws                                              |
+| `b5_event`           | B5        | per-event summary of all six sensitive detectors                                                                |
+| `step_hit`           | —         | one step of one track. Nothing sends it any more; kept as the only way to get per-step kinematics over the wire |
 
 Geometry does not travel this way: it has its own rpc, `SendGeometry`, because
 it is not per event.
