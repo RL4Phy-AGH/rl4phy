@@ -1,6 +1,7 @@
 #include "ActionInitialization.hh"
 #include "PrimaryGeneratorAction.hh"
 #include "SteppingAction.hh"
+#include "EventAction.hh"
 #include "RunAction.hh"
 
 ActionInitialization::ActionInitialization(GrpcClient* client)
@@ -11,5 +12,6 @@ ActionInitialization::ActionInitialization(GrpcClient* client)
 void ActionInitialization::Build() const {
   SetUserAction(new PrimaryGeneratorAction());
   SetUserAction(new RunAction());
-  SetUserAction(new SteppingAction(fGrpcClient));
+  SetUserAction(new SteppingAction());
+  SetUserAction(new EventAction(fGrpcClient));
 }

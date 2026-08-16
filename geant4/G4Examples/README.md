@@ -20,8 +20,9 @@ The proto uses `oneof payload` — each message carries **one** data type only:
 | Payload | Example | Meaning |
 |---------|---------|---------|
 | `event_scoring` | B1 | total energy deposit in the scoring volume, per event (MeV) |
-| `step_hit` | MUonE, B5 | one step of one track: position, momentum, kinetic energy |
+| `event_trajectories` | MUonE, B5 | every trajectory of one event: the polylines Geant4's viewer draws |
 | `b5_event` | B5 | per-event summary of all six sensitive detectors |
+| `step_hit` | — | one step of one track, with momentum and kinetic energy. Nothing sends it any more; kept because it is the only way to get per-step kinematics over the wire |
 
 To add a new example: define a new `message` in the proto and add it to the `oneof`.
 
@@ -121,28 +122,42 @@ ntuple, nothing more:
 Cells are indexed `column * rows + row`, so they reshape to `(20, 4)` and
 `(10, 2)`.
 
-On top of that, one `step_hit` per step — the trajectories, the same lines
-Geant4's own OpenGL viewer draws:
+On top of that, one `event_trajectories` per event — the lines Geant4's own
+OpenGL viewer draws, taken from `G4Event::GetTrajectoryContainer()`, which is
+exactly what `/vis/scene/add/trajectories` renders. Nothing example specific
+about it: `commons/TrajectoryStream.hh` does the whole job, and B5 only calls it.
 
 | Field | Meaning |
 |-------|---------|
-| `x`, `y`, `z` | pre-step point, global coordinates [mm] |
-| `px`, `py`, `pz` | momentum at the pre-step point [MeV/c] |
-| `e_kin` | kinetic energy at the pre-step point [MeV] |
-| `track_id`, `parent_id` | the track and the one that produced it (`0` for a primary) |
 | `event_id` | as above |
-| `pdg` | PDG code of the particle |
+| `trajectories` | one entry per tracked particle |
 
-The message is MUonE's, reused unchanged; the selection is not. MUonE keeps only
-the steps inside its `Station` volumes, whereas B5 sends every volume, World
-included, because the flight through the air and the curve inside the magnet are
-what make the picture readable. What that leaves are the showers in the two
-calorimeters, thousands of very soft steps per event that add nothing to look
-at, so the filter is a minimum kinetic energy instead: `--track-min-ekin <MeV>`,
-default `1.0`, `0` sends every step. Each worker thread prints how many hits it
-sent and how many the cut dropped when the run ends, so the threshold can be
-tuned from the log — on `run1.mac` in one thread the default sends 10382 and
-drops 22666, `--track-min-ekin 0` sends all 33048.
+and per trajectory:
+
+| Field | Meaning |
+|-------|---------|
+| `track_id`, `parent_id` | the track and the one that produced it (`0` for a primary) |
+| `pdg` | PDG code of the particle |
+| `charge` | in units of `e`, so `drawByCharge` colouring is reproducible |
+| `particle_name` | Geant4's own name, e.g. `e-`, `gamma` |
+| `points` | the polyline, flattened as `x,y,z` triples [mm] |
+| `initial_e_kin` | kinetic energy at the start of the track [MeV] |
+
+There is no cut: every track the viewer would show is sent, unlike the earlier
+per-step version which dropped everything below 1 MeV to keep the calorimeter
+showers from drowning the picture. It can afford to, because the cost is one
+message per event instead of one per step — on `run1.mac` that is 12 messages
+covering 13619 trajectories, where the step version sent 10382 of its 33048
+steps. Each event prints `Trajectories sent: N`, next to B5's own per event
+diagnostics.
+
+Every event sends, including one with nothing to draw. On the receiver a
+message is what clears the previous event off the screen, so an event that
+stayed silent would leave the event before it drawn over the right geometry.
+
+To draw less than everything, pass a filter to `TrajectoryStream::SendEvent()`;
+it is a `std::function<bool(const G4VTrajectory&)>`, so a cut is a lambda in
+`main` and needs no change here or in `commons/`.
 
 ### What we added (all in `B5_rl4phys.cc`)
 
@@ -153,23 +168,25 @@ Same rule as B1 — **subclass, never edit the example**:
    then reads the results back and sends `b5_event`. Cell energies come from the
    public `GetEmCalEdep()` / `GetHadCalEdep()`; hit counts and hodoscope times
    come from the event's hit collections, whose Ids the base class keeps private
-   and this class therefore looks up once per worker thread.
+   and this class therefore looks up once per worker thread. Then one call to
+   `TrajectoryStream::SendEvent()` for the trajectories — no stepping action,
+   because Geant4 has already built them. It holds its own `GrpcClient`:
+   `Build()` runs once per worker thread and a client is never shared between
+   them.
 
-2. **`RL4PhysSteppingAction`** (extends `G4UserSteppingAction`)
-   B5 ships no stepping action of its own, so unlike B1 there is no base
-   implementation to call first. Reads the pre-step point, applies the energy
-   cut and sends `step_hit`. It holds its own `GrpcClient`, the same way the
-   event action does: `Build()` runs once per worker thread and a client is
-   never shared between them.
-
-3. **`RL4PhysActionInitialization`** (extends `ActionInitialization`)
-   Wires the two of them in. **Note:** B5's `RunAction` takes the event
-   action in its constructor (its ntuple columns point at vectors the event
-   action owns), so the gRPC one has to be passed there too.
+2. **`RL4PhysActionInitialization`** (extends `ActionInitialization`)
+   Wires it in. **Note:** B5's `RunAction` takes the event action in its
+   constructor (its ntuple columns point at vectors the event action owns), so
+   the gRPC one has to be passed there too.
 
 `main` mirrors `exampleB5.cc` — `FTFP_BERT` plus `G4StepLimiterPhysics`, same
 order — and adds batch mode, `--threads`, `--grpc-host` and `--export-gdml`,
-exactly like B1, plus `--track-min-ekin` for the step hits.
+exactly like B1. It also calls `TrajectoryStream::Enable()` next to the geometry
+hand-off: a batch run stores no trajectories unless something asks for them,
+and interactively it is the vis system that asks. The call goes through
+`/tracking/storeTrajectory`, which is per thread, so it is applied on the master
+and `G4MTRunManager` replays it on every worker — the same route the vis manager
+takes.
 
 ### Build & run (Docker)
 
@@ -230,6 +247,11 @@ Two details it takes care of, both easy to get wrong by hand:
 
 ## Checklist for the next example
 
+0. **Geometry and trajectories are already done.** They are the same for every
+   example, so they live in `commons/` and cost two calls, no new code:
+   `GeometryExport::SendOverGrpc(client)` and `TrajectoryStream::Enable()` in
+   `main`, `TrajectoryStream::SendEvent(client, event)` at end of event. Only the
+   example-specific scoring is left to write.
 1. **Understand the original scoring** — per step, event, or run? Which volume?
 2. **Extend the proto** — new `message` + new `oneof` arm (do not break existing ones).
 3. **Integrate in C++** — prefer a separate `*_rl4phys.cc`; subclass existing actions;
@@ -250,7 +272,7 @@ Two details it takes care of, both easy to get wrong by hand:
 | Example | Location | Payload |
 |---------|----------|---------|
 | B1 | `G4Examples/B1_rl4phys.cc` | `event_scoring` (own stub, not yet on `commons/GrpcClient.hh`) |
-| B5 | `G4Examples/B5_rl4phys.cc` | `b5_event` + `step_hit` (uses `commons/GrpcClient.hh`) |
-| MUonE | `geant4/MUonE/` | `step_hit` (uses `commons/GrpcClient.hh`) |
+| B5 | `G4Examples/B5_rl4phys.cc` | `b5_event` + `event_trajectories` (uses `commons/`) |
+| MUonE | `geant4/MUonE/` | `event_trajectories` (uses `commons/`) |
 
 ---

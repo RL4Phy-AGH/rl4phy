@@ -16,7 +16,17 @@ C++; GDML is the export, not the source.
   `--gdml <file>` (import instead of the C++ build), `--vis [macro]`, `<macro>`.
 - `src/SteppingAction.*`: one `STEP` line per step with the track's position,
   momentum, energy, time and the process (column header from `RunAction`).
+  Console only, and still only the steps inside the `Station` volumes.
+- `src/EventAction.*`: one `event_trajectories` message per event over gRPC —
+  the polylines Geant4's own viewer draws, straight out of the event's
+  trajectory container, via `commons/TrajectoryStream.hh`. Whole tracks, not
+  just the pieces inside the stations, because the point is to put our picture
+  next to the OpenGL one. Prints `TRAJECTORIES <eventID> <count>`.
 - `macros/`: `run.mac` (mu- 160 GeV beam), `vis.mac` (OpenGL view).
+
+The trajectories only go out when `--grpc-host` is given, which is also when
+`main` switches trajectory storage on: a batch run keeps none by default, and in
+`--vis` mode the vis system asks for them itself.
 
 ### Build (Windows, Geant4 11.3 with GDML + Xerces via vcpkg)
 

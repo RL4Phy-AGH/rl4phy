@@ -24,6 +24,9 @@ public:
     Send(packet);
   }
 
+  // No example sends these any more - the trajectories below replaced them -
+  // but they stay for the same reason StepHit stays in the proto: they are the
+  // only way to get per-step kinematics over the wire.
   void SendStepHit(float x, float y, float z,
                    float px, float py, float pz, float e_kin_MeV,
                    int track_id, int event_id, int parent_id, int pdg) {
@@ -55,6 +58,16 @@ public:
   void SendB5Event(const rl4phys::B5Event& event) {
     rl4phys::Data packet;
     *packet.mutable_b5_event() = event;
+    Send(packet);
+  }
+
+  // Every trajectory of one event, filled by TrajectoryStream.hh. One call per
+  // event and not one per step: a trajectory only means anything whole, and the
+  // per-step version cost thousands of round trips per event for the same
+  // picture.
+  void SendTrajectories(const rl4phys::EventTrajectories& trajectories) {
+    rl4phys::Data packet;
+    *packet.mutable_event_trajectories() = trajectories;
     Send(packet);
   }
 

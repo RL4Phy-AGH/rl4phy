@@ -14,6 +14,7 @@
 
 #ifdef RL4PHY_ENABLE_GRPC
 #include "GrpcClient.hh"
+#include "TrajectoryStream.hh"
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #endif
@@ -79,6 +80,12 @@ int main(int argc, char** argv) {
     std::cerr << "GDML support is not available in this build."
               << " Falling back to the in-code geometry." << std::endl;
   }
+#endif
+
+#ifdef RL4PHY_ENABLE_GRPC
+  // Nothing keeps trajectories in a batch run unless it is asked for; the
+  // viewer asks for itself, so this is only needed for the ones we send.
+  if (grpcClient) TrajectoryStream::Enable();
 #endif
 
   auto* uiMgr = G4UImanager::GetUIpointer();

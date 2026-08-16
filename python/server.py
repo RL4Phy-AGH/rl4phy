@@ -5,8 +5,11 @@ import time
 import zlib
 from collections import Counter
 from concurrent import futures
+from typing import NamedTuple
 
 import grpc
+
+import numpy as np
 
 import rerun as rr
 
@@ -132,12 +135,11 @@ def log_detector(solids: list[PlacedSolid]) -> None:
         rr.log(entity, archetype, static=True)
 
 
-# PDG code to name and colour, for the species a B5 shower is made of. Colouring
-# by particle is what Geant4's own drawByCharge does, and for the same reason: a
-# shower is hundreds of tracks, so a colour per track carries no information,
-# while the species is what separates the electromagnetic part of the shower from
-# the hadronic one at a glance. It is also stable, where a colour drawn per track
-# made the same particle look different in every event.
+# PDG code to name and colour, for the species a B5 shower is made of. This
+# table belongs to the step path and only to it: a step hit carries a PDG code
+# and nothing else, so a colour per species is the most that can be made of it.
+# A whole trajectory carries the charge as well, and is coloured by
+# _charge_color below instead.
 _PARTICLES: dict[int, tuple[str, list[int]]] = {
     22: ("gamma", [255, 236, 130]),
     11: ("e-", [90, 160, 255]),
@@ -162,6 +164,40 @@ def _particle(pdg: int) -> tuple[str, list[int]]:
     hue = (zlib.crc32(str(pdg).encode()) % 997) / 997.0
     r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 1.0)
     return f"pdg {pdg}", [round(r * 255), round(g * 255), round(b * 255)]
+
+
+# Geant4's own drawByCharge palette, exactly as G4Colour names it: negative red,
+# positive blue, neutral green. That is the modelling B5's vis.mac switches on,
+# so it is what the OpenGL window this view exists to be checked against is
+# painted with, and painting the same way is the entire point of the exercise:
+# the same track comes out the same colour in both windows, and the two pictures
+# can be laid side by side and compared by eye rather than translated first.
+# Species colouring would carry more information, but it would carry it in the
+# one channel the reference picture has already spent, and the information is not
+# actually lost by giving it up: the particle's own name rides on every track as
+# its label and is counted in the per-event line, and the two species anyone
+# needs to tell apart in an electromagnetic shower, e- and e+, have opposite
+# charges and so come out apart anyway.
+def _charge_color(charge: float) -> list[int]:
+    if charge > 0.0:
+        return [0, 0, 255]
+    if charge < 0.0:
+        return [255, 0, 0]
+    return [0, 255, 0]
+
+
+# One track ready to be drawn. The two things that produce tracks know different
+# amounts about them - a buffered step hit carries a PDG code and nothing else, a
+# whole trajectory carries Geant4's own name, the charge and the energy the track
+# started with - so each turns what it has into one of these, and _draw_tracks
+# below is written once and never has to ask which of the two handed it over.
+class DrawableTrack(NamedTuple):
+    points: np.ndarray  # (N, 3), mm
+    color: list[int]
+    species: str
+    track_id: int
+    # Left as None by the step path, which does not keep the energy of a step.
+    initial_e_kin: float | None = None
 
 
 class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
@@ -208,6 +244,8 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
                 self._log_step_hit(request.step_hit)
             elif kind == "b5_event":
                 self._log_b5_event(request.b5_event)
+            elif kind == "event_trajectories":
+                self._log_event_trajectories(request.event_trajectories)
             else:
                 print(f"[{self.msg}] unknown payload")
 
@@ -246,13 +284,14 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             self._events_seen += 1
         return slot
 
-    # Draws every track of one event in a single pass. complete says whether the
-    # event can still gain steps: when it cannot the buffer goes, when it might
-    # the buffer stays and a later call redraws the event at the same point on
-    # the timeline, where the fuller picture simply replaces this one.
+    # Turns what has been buffered for one event into tracks and hands them to
+    # be drawn. complete says whether the event can still gain steps: when it
+    # cannot the buffer goes, when it might the buffer stays and a later call
+    # redraws the event at the same point on the timeline, where the fuller
+    # picture simply replaces this one.
     def _flush_event(self, event_id: int, *, complete: bool) -> None:
-        tracks = self._pending.get(event_id, {})
-        total_points = sum(len(track) for track in tracks.values())
+        buffered = self._pending.get(event_id, {})
+        total_points = sum(len(track) for track in buffered.values())
         slot = self._event_slot(event_id)
         # Read rather than taken: an event that is still buffered has to keep its
         # entry, or the next quiet tick would find none, draw the same picture
@@ -274,21 +313,61 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         if already_drawn == total_points:
             return
 
-        strips: list[list[list[float]]] = []
-        strip_colors: list[list[int]] = []
-        strip_labels: list[str] = []
-        points: list[list[float]] = []
-        point_colors: list[list[int]] = []
-        species: Counter[str] = Counter()
-
-        for (track_id, pdg), track in tracks.items():
+        tracks: list[DrawableTrack] = []
+        for (track_id, pdg), track in buffered.items():
             name, color = _particle(pdg)
-            strips.append(track)
-            strip_colors.append(color)
-            strip_labels.append(f"{name} #{track_id}")
-            points.extend(track)
-            point_colors.extend([color] * len(track))
-            species[name] += 1
+            tracks.append(
+                DrawableTrack(
+                    np.asarray(track, dtype=np.float32), color, name, track_id
+                )
+            )
+        self._draw_tracks(event_id, slot, tracks)
+
+    # One event's worth of tracks, arriving whole. Nothing about a trajectory
+    # needs buffering: it is only ever sent once its stepping is over, so there
+    # is no marker to wait for and no partial picture to improve on later.
+    def _log_event_trajectories(self, event) -> None:
+        # The place on the timeline is taken and given back in the same breath,
+        # because unlike a buffered event there will never be a second, fuller
+        # draw to hold it for. It still comes off the step path's counter: what
+        # makes a place unique is that the counter never goes back, and the event
+        # id does, since /run/beamOn restarts it at 0.
+        slot = self._event_slot(event.event_id)
+        self._event_slots.pop(event.event_id, None)
+
+        tracks = [
+            DrawableTrack(
+                # The wire flattens each polyline into x,y,z triples, so its
+                # length is always a multiple of 3 and this only folds it back.
+                points=np.asarray(t.points, dtype=np.float32).reshape(-1, 3),
+                color=_charge_color(t.charge),
+                # Geant4's own name, so nothing has to be recovered from the PDG
+                # code and a rare species reads as itself rather than as a number.
+                species=t.particle_name,
+                track_id=t.track_id,
+                initial_e_kin=t.initial_e_kin,
+            )
+            for t in event.trajectories
+        ]
+        self._draw_tracks(event.event_id, slot, tracks)
+
+    # The one place tracks reach Rerun from. Both sources hand their event over
+    # here rather than logging it themselves, so however an event was assembled
+    # it lands on the same timeline, in the same two entities, under the same
+    # rule about labels, and is announced by the same line.
+    def _draw_tracks(
+        self, event_id: int, slot: int, tracks: list[DrawableTrack]
+    ) -> None:
+        # Shaped rather than built as lists because a shower event is hundreds of
+        # tracks and hundreds of thousands of points, and repeating a colour per
+        # point in Python is the one part of this that would be felt.
+        colors = np.array([t.color for t in tracks], dtype=np.uint8).reshape(-1, 3)
+        points = (
+            np.concatenate([t.points for t in tracks])
+            if tracks
+            else np.zeros((0, 3), dtype=np.float32)
+        )
+        point_colors = np.repeat(colors, [len(t.points) for t in tracks], axis=0)
 
         # Named event_index rather than event so that nobody reads a slider
         # position as a Geant4 event number: the two only agree for the first run.
@@ -296,32 +375,42 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         # for whatever the slider is sitting on.
         rr.set_time("event_index", sequence=slot)
 
+        # The number Geant4 printed for this event, which is what a person has in
+        # the other window and wants to match against. It rides with the strips
+        # instead of on a timeline of its own precisely because it repeats between
+        # runs.
+        values: dict[str, object] = {"event_id": event_id}
+        # The energy a track started with only comes with a trajectory, so rather
+        # than filling the step path's in with zeros it is left off there. It is
+        # logged and never drawn: clicking a track then says whether it is the
+        # primary or one of the hundreds of soft secondaries around it, which is
+        # a number worth having and not worth putting on screen per track.
+        if tracks and all(t.initial_e_kin is not None for t in tracks):
+            values["initial_e_kin"] = [t.initial_e_kin for t in tracks]
+
         # One row for all of the event's tracks rather than an entity per track:
         # a shower is hundreds of them, and a subtree each would bury everything
         # else in the viewer. Both archetypes are logged even when the event is
         # empty, since that is what clears the previous event off the screen.
-        # The polylines and the step points they are built from stay apart so the
+        # The polylines and the points they are built from stay apart so the
         # points can be switched off once they turn into fog.
         rr.log(
             "world/tracks/lines",
             rr.LineStrips3D(
-                strips,
-                colors=strip_colors,
-                labels=strip_labels,
-                show_labels=len(strips) <= MAX_LABELS_DRAWN,
+                [t.points for t in tracks],
+                colors=colors,
+                labels=[f"{t.species} #{t.track_id}" for t in tracks],
+                show_labels=len(tracks) <= MAX_LABELS_DRAWN,
             ),
-            # The number Geant4 printed for this event, which is what a person
-            # has in the other window and wants to match against. It rides with
-            # the strips instead of on a timeline of its own precisely because it
-            # repeats between runs.
-            rr.AnyValues(event_id=event_id),
+            rr.AnyValues(**values),
         )
         rr.log("world/tracks/points", rr.Points3D(points, colors=point_colors))
 
+        species = Counter(t.species for t in tracks)
         tally = ", ".join(f"{n} {name}" for name, n in species.most_common())
         print(
             f"[{self.msg}] tracks: event={event_id} (index {slot})  "
-            f"{len(strips)} track(s), {len(points)} point(s)  "
+            f"{len(tracks)} track(s), {len(points)} point(s)  "
             f"[{tally}]"
         )
 
@@ -330,7 +419,13 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         # this is the exact moment the event's tracks are complete, and it stays
         # exact however many worker threads B5 was started with.
         self._event_marker_seen = True
-        self._flush_event(event.event_id, complete=True)
+        # Only when there is in fact something buffered to complete. B5 sends this
+        # summary alongside its trajectories, which were drawn as they arrived and
+        # have already given their place on the timeline back, so flushing an
+        # empty buffer here would claim a second place and blank the picture they
+        # had just drawn on the first.
+        if event.event_id in self._pending:
+            self._flush_event(event.event_id, complete=True)
 
         # The calorimeter cells arrive one value per cell and most of them are
         # empty, so print the totals the way B5's own EndOfEventAction does.
@@ -357,6 +452,13 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             if self.msg != self._msg_at_last_check:
                 # Still arriving, so whatever is buffered is not finished yet.
                 self._msg_at_last_check = self.msg
+                return
+
+            if not self._pending and not self._event_marker_seen:
+                # Nothing held and no marker rule latched on, which is exactly
+                # what a stream made only of trajectories leaves behind: they
+                # arrive whole and are drawn where they land, so none of the
+                # machinery below ever has anything of theirs to finish.
                 return
 
             if self._steps_pending_draw:
