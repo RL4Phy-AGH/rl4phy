@@ -20,9 +20,6 @@
 
 #include "QBBC.hh"
 
-#include "G4GDMLParser.hh"
-#include "G4TransportationManager.hh"
-
 #include "Randomize.hh"
 
 #include "G4Event.hh"
@@ -30,8 +27,10 @@
 #include "G4LogicalVolume.hh"
 #include "G4SystemOfUnits.hh"
 
+#include "GeometryExport.hh"
+#include "GrpcClient.hh"
+
 #include <grpcpp/grpcpp.h>
-#include "rl4phy.grpc.pb.h"
 
 #include <cstring>
 #include <cstdlib>
@@ -46,7 +45,7 @@ class GrpcEventAction : public EventAction
   public:
     GrpcEventAction(RunAction* runAction, std::shared_ptr<grpc::Channel> channel)
       : EventAction(runAction),
-        fStub(rl4phys::SendService::NewStub(std::move(channel)))
+        fClient(std::move(channel))
     {}
 
     void BeginOfEventAction(const G4Event* event) override
@@ -61,16 +60,13 @@ class GrpcEventAction : public EventAction
     {
       EventAction::EndOfEventAction(event);
 
-      rl4phys::Data data;
-      data.mutable_event_scoring()->set_edep(static_cast<float>(fGrpcEdep / MeV));
-
-      rl4phys::Reply reply;
-      grpc::ClientContext ctx;
-      fStub->SendData(&ctx, data, &reply);
+      fClient.SendEventScoring(static_cast<float>(fGrpcEdep / MeV),
+                               event->GetEventID());
     }
 
   private:
-    std::unique_ptr<rl4phys::SendService::Stub> fStub;
+    // One client per event action, i.e. one per worker thread.
+    GrpcClient fClient;
     G4double fGrpcEdep = 0.;
 };
 
@@ -299,31 +295,48 @@ int main(int argc, char** argv)
       std::strcmp(argv[1], "--export-gdml") == 0)
   {
 
-    G4GDMLParser parser;
+    G4bool written =
+        GeometryExport::WriteToFile(
+            argv[2]
+        );
 
 
-    auto world =
-        G4TransportationManager::
-        GetTransportationManager()
-        ->GetNavigatorForTracking()
-        ->GetWorldVolume();
-
-
-    parser.Write(
-        argv[2],
-        world
-    );
-
-
-    G4cout
-        << "Geometry exported to: "
-        << argv[2]
-        << G4endl;
+    if (written)
+    {
+      G4cout
+          << "Geometry exported to: "
+          << argv[2]
+          << G4endl;
+    }
 
 
     delete runManager;
 
-    return 0;
+    return written ? 0 : 1;
+  }
+
+
+
+  // ------------------------------------------------------------
+  // Geometry hand-off
+  //
+  // Every run opens by shipping its geometry to the Python side, so the
+  // event data that follows has something to be drawn on. Independent of
+  // --export-gdml above, which is only an on-disk copy for us to look at.
+  // ------------------------------------------------------------
+
+  {
+    GrpcClient geometryClient(channel);
+
+
+    if (auto sent = GeometryExport::SendOverGrpc(geometryClient))
+    {
+      G4cout
+          << "Geometry sent over gRPC: "
+          << sent
+          << " bytes"
+          << G4endl;
+    }
   }
 
 

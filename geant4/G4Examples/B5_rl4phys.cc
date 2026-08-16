@@ -22,9 +22,6 @@
 #include "FTFP_BERT.hh"
 #include "G4StepLimiterPhysics.hh"
 
-#include "G4GDMLParser.hh"
-#include "G4TransportationManager.hh"
-
 #include "Randomize.hh"
 
 #include "G4Event.hh"
@@ -33,6 +30,7 @@
 #include "G4SystemOfUnits.hh"
 #include "G4VHitsCollection.hh"
 
+#include "GeometryExport.hh"
 #include "GrpcClient.hh"
 
 #include <grpcpp/grpcpp.h>
@@ -351,31 +349,48 @@ int main(int argc, char** argv)
   if (!gdmlFile.empty())
   {
 
-    G4GDMLParser parser;
+    G4bool written =
+        GeometryExport::WriteToFile(
+            gdmlFile
+        );
 
 
-    auto world =
-        G4TransportationManager::
-        GetTransportationManager()
-        ->GetNavigatorForTracking()
-        ->GetWorldVolume();
-
-
-    parser.Write(
-        gdmlFile,
-        world
-    );
-
-
-    G4cout
-        << "Geometry exported to: "
-        << gdmlFile
-        << G4endl;
+    if (written)
+    {
+      G4cout
+          << "Geometry exported to: "
+          << gdmlFile
+          << G4endl;
+    }
 
 
     delete runManager;
 
-    return 0;
+    return written ? 0 : 1;
+  }
+
+
+
+  // ------------------------------------------------------------
+  // Geometry hand-off
+  //
+  // Every run opens by shipping its geometry to the Python side, so the
+  // event data that follows has something to be drawn on. Independent of
+  // --export-gdml above, which is only an on-disk copy for us to look at.
+  // ------------------------------------------------------------
+
+  {
+    GrpcClient geometryClient(channel);
+
+
+    if (auto sent = GeometryExport::SendOverGrpc(geometryClient))
+    {
+      G4cout
+          << "Geometry sent over gRPC: "
+          << sent
+          << " bytes"
+          << G4endl;
+    }
   }
 
 

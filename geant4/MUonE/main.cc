@@ -5,13 +5,11 @@
 #include "FTFP_BERT.hh"
 #include "DetectorConstruction.hh"
 #include "ActionInitialization.hh"
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <string>
 
 #ifdef RL4PHY_ENABLE_GDML
-#include "G4GDMLParser.hh"
+#include "GeometryExport.hh"
 #endif
 
 #ifdef RL4PHY_ENABLE_GRPC
@@ -60,29 +58,22 @@ int main(int argc, char** argv) {
   runManager->Initialize();
 
 #ifdef RL4PHY_ENABLE_GDML
-  if (!exportGdml.empty()) {
-    G4GDMLParser parser;
-    // false keeps the names clean (Station1, ...); otherwise Geant4 tacks a
-    // pointer-hash onto every name, and Python has to read this file.
-    parser.Write(exportGdml, detector->GetWorldPV(), false);
+  // An explicit on-disk copy, only when asked for.
+  if (!exportGdml.empty() &&
+      GeometryExport::WriteToFile(exportGdml, detector->GetWorldPV())) {
     std::cout << "GDML EXPORTED: " << exportGdml << std::endl;
+  }
 
 #ifdef RL4PHY_ENABLE_GRPC
-    // Geometry hand-off (issue #18): ship the freshly exported GDML to the
-    // Python side over the same channel the steps use.
-    if (grpcClient) {
-      std::ifstream gdmlIn(exportGdml, std::ios::binary);
-      std::string gdmlContent((std::istreambuf_iterator<char>(gdmlIn)),
-                              std::istreambuf_iterator<char>());
-      if (gdmlContent.empty()) {
-        std::cerr << "GDML file is empty, nothing sent over gRPC." << std::endl;
-      } else if (grpcClient->SendGeometry(gdmlContent)) {
-        std::cout << "GDML SENT OVER GRPC: " << gdmlContent.size() << " bytes"
-                  << std::endl;
-      }
+  // Geometry hand-off (issue #18): every run ships its geometry to the Python
+  // side over the same channel the steps use, whether or not a copy was written
+  // to disk above.
+  if (grpcClient) {
+    if (auto sent = GeometryExport::SendOverGrpc(*grpcClient, detector->GetWorldPV())) {
+      std::cout << "GDML SENT OVER GRPC: " << sent << " bytes" << std::endl;
     }
-#endif
   }
+#endif
 #else
   if (!gdmlFile.empty() || !exportGdml.empty()) {
     std::cerr << "GDML support is not available in this build."
