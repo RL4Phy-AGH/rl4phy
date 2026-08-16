@@ -20,9 +20,13 @@ from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid, parse_gdml
 
 RERUN_GRPC_PORT = 9876
 
-# Where the GDML received over gRPC (issue #18) is dumped before parsing.
+# Where the GDML received over gRPC (issue #18) is dumped before parsing. Not
+# named after any one example: every example ships its geometry this way now, and
+# a run sends one at the start of each /run/beamOn, so the file holds whichever
+# detector spoke last. It is overwritten every time and exists to be opened by a
+# person who wants to see what actually arrived.
 GDML_GRPC_RECEIVED_PATH = os.environ.get(
-    "GDML_GRPC_RECEIVED_PATH", "/tmp/muone_received.gdml"
+    "GDML_GRPC_RECEIVED_PATH", "/tmp/rl4phy_received.gdml"
 )
 
 # Volume and particle names are always logged, but drawing them on top of the
