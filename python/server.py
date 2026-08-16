@@ -184,6 +184,8 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         self._points_drawn: dict[int, int] = {}
         # B5 marks the end of every event explicitly and MUonE does not, so which
         # of the two rules below applies is read off the stream, not configured.
+        # It only describes the run in progress, and flush_quiet_tracks clears it
+        # when that run ends, since the next one may be a different example.
         self._event_marker_seen = False
         self._steps_pending_draw = False
         self._msg_at_last_check = 0
@@ -252,19 +254,25 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         tracks = self._pending.get(event_id, {})
         total_points = sum(len(track) for track in tracks.values())
         slot = self._event_slot(event_id)
+        # Read rather than taken: an event that is still buffered has to keep its
+        # entry, or the next quiet tick would find none, draw the same picture
+        # again, put the entry back, and alternate that way for as long as the
+        # buffer is held.
+        already_drawn = self._points_drawn.get(event_id)
         if complete:
             self._pending.pop(event_id, None)
             self._event_slots.pop(event_id, None)
+            self._points_drawn.pop(event_id, None)
             if self._current_event == event_id:
                 self._current_event = None
+        else:
+            self._points_drawn[event_id] = total_points
 
         # An event the idle flusher already drew is only drawn again once it has
         # grown, so confirming a quiet event costs nothing and the same picture
         # does not take up two places on the slider.
-        if self._points_drawn.pop(event_id, None) == total_points:
+        if already_drawn == total_points:
             return
-        if not complete:
-            self._points_drawn[event_id] = total_points
 
         strips: list[list[list[float]]] = []
         strip_colors: list[list[int]] = []
@@ -350,11 +358,28 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
                 # Still arriving, so whatever is buffered is not finished yet.
                 self._msg_at_last_check = self.msg
                 return
-            if not self._steps_pending_draw:
+
+            if self._steps_pending_draw:
+                # One quiet interval on its own could still be a lull in the
+                # middle of an event, so this draws what is held without giving
+                # it up, and a later flush redraws the event where it already is.
+                self._steps_pending_draw = False
+                for event_id in list(self._pending):
+                    self._flush_event(event_id, complete=False)
                 return
-            self._steps_pending_draw = False
-            for event_id in list(self._pending):
-                self._flush_event(event_id, complete=False)
+
+            # Two quiet intervals in a row, so the run really has ended. All of
+            # this is per run, and the compose python service outlives any one
+            # example: a MUonE run started after a B5 one would otherwise find
+            # the marker rule latched on, never complete an event, and hold every
+            # buffer and every slot it ever took until the process died. Nothing
+            # is lost by dropping the buffers, since the pass above has already
+            # drawn them; only _events_seen carries over, so slots stay unique.
+            self._pending.clear()
+            self._event_slots.clear()
+            self._points_drawn.clear()
+            self._event_marker_seen = False
+            self._current_event = None
 
     def SendGeometry(self, request, context):
         # Geometry hand-off (issue #18): Geant4 ships the exported GDML over
