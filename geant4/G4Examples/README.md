@@ -146,8 +146,8 @@ over the course of `B5/run1.mac`:
 ![B5 with the second arm at its default 30 degrees](img/b5-arm-30deg.png)
 
 *`event_index` 1, in the first run of `B5/run1.mac`: the second arm sits at its
-default 30°. The fixed first arm is the box to the right of the magnet, the arm that
-moves is the one to the left of it.*
+default 30°. It is the arm with the two calorimeters at its far end; the first arm,
+which never moves, carries only a hodoscope and a drift chamber.*
 
 ![B5 with the two arms in line](img/b5-arm-0deg.png)
 
