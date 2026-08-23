@@ -27,7 +27,7 @@
 #include "G4LogicalVolume.hh"
 #include "G4SystemOfUnits.hh"
 
-#include "GeometryExport.hh"
+#include "GeometryStream.hh"
 #include "GrpcClient.hh"
 
 #include <grpcpp/grpcpp.h>
@@ -296,7 +296,7 @@ int main(int argc, char** argv)
   {
 
     G4bool written =
-        GeometryExport::WriteToFile(
+        GeometryStream::WriteToFile(
             argv[2]
         );
 
@@ -329,7 +329,7 @@ int main(int argc, char** argv)
     GrpcClient geometryClient(channel);
 
 
-    if (auto sent = GeometryExport::SendOverGrpc(geometryClient))
+    if (auto sent = GeometryStream::SendOverGrpc(geometryClient))
     {
       G4cout
           << "Geometry sent over gRPC: "

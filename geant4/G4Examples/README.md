@@ -9,7 +9,7 @@ streams its results over gRPC to the Python receiver, which draws them in Rerun.
 | What | Where it comes from | What it costs you |
 |------|---------------------|-------------------|
 | the example's own scoring | whatever the example already computes | a message in `proto/rl4phy.proto`, a `Send…()` in `commons/GrpcClient.hh`, a branch in `python/server.py` |
-| the geometry | `commons/GeometryExport.hh` | one call in `BeginOfRunAction` |
+| the geometry | `commons/GeometryStream.hh` | one call in `BeginOfRunAction` |
 | the trajectories | `commons/TrajectoryStream.hh` | one call in `main`, one in `EndOfEventAction` |
 
 Three rules always hold:
@@ -54,7 +54,7 @@ Three headers, on every example's include path. Details in
 | Header | What it is for | The calls that matter |
 |--------|----------------|-----------------------|
 | `GrpcClient.hh` | the wire | `SendEventScoring`, `SendB5Event`, `SendTrajectories`, `SendGeometry` |
-| `GeometryExport.hh` | the detector | `SendForRun`, `WriteToFile` |
+| `GeometryStream.hh` | the detector | `SendForRun`, `WriteToFile` |
 | `TrajectoryStream.hh` | the tracks | `Enable`, `SendEvent` |
 
 ### `GrpcClient.hh` — the wire
@@ -80,7 +80,7 @@ Examples hold no protobuf stub of their own; a new payload gets a
   client, so a fresh client per run pays the 30 s again every run. Hold the
   client as a member of the action.
 
-### `GeometryExport.hh` — the detector
+### `GeometryStream.hh` — the detector
 
 ```cpp
 bool        WriteToFile(const std::string& path, const G4VPhysicalVolume* world = nullptr);
@@ -157,8 +157,8 @@ neither is fine.
 
 | What you want | What to write |
 |---------------|---------------|
-| your scoring only | the payload, and nothing from `GeometryExport` or `TrajectoryStream` |
-| scoring + a detector to look at | add `GeometryExport::SendForRun()` in `BeginOfRunAction` |
+| your scoring only | the payload, and nothing from `GeometryStream` or `TrajectoryStream` |
+| scoring + a detector to look at | add `GeometryStream::SendForRun()` in `BeginOfRunAction` |
 | scoring + the picture Geant4's viewer would draw | add `TrajectoryStream::Enable()` in `main` and `SendEvent()` in `EndOfEventAction` |
 | the picture and no scoring of your own | both of the above and no new proto message — this is what `geant4/MUonE/` does |
 
@@ -218,7 +218,7 @@ deleted without touching anything else.
 #include "FTFP_BERT.hh"          // whichever physics list the example itself uses
 
 #include "GrpcClient.hh"
-#include "GeometryExport.hh"     // optional: geometry
+#include "GeometryStream.hh"     // optional: geometry
 #include "TrajectoryStream.hh"   // optional: trajectories
 
 #include <grpcpp/grpcpp.h>
@@ -274,7 +274,7 @@ class GrpcRunAction : public RunAction
       RunAction::BeginOfRunAction(run);
 
       // Master thread only, and 0 on a worker, so this stays quiet there.
-      if (auto sent = GeometryExport::SendForRun(fClient)) {
+      if (auto sent = GeometryStream::SendForRun(fClient)) {
         G4cout << "Geometry sent over gRPC: " << sent << " bytes" << G4endl;
       }
     }
@@ -361,7 +361,7 @@ int main(int argc, char** argv)
 
   // optional: an on-disk copy for a person to open, then stop.
   if (!gdmlFile.empty()) {
-    const G4bool written = GeometryExport::WriteToFile(gdmlFile);
+    const G4bool written = GeometryStream::WriteToFile(gdmlFile);
     if (written) G4cout << "Geometry exported to: " << gdmlFile << G4endl;
     delete runManager;
     return written ? 0 : 1;
@@ -401,7 +401,7 @@ reports as the master thread.
 
 | Left out | What you get |
 |----------|--------------|
-| `GeometryExport::SendForRun()` | tracks drawn in an empty world — or on another example's detector, if one ran earlier in the session |
+| `GeometryStream::SendForRun()` | tracks drawn in an empty world — or on another example's detector, if one ran earlier in the session |
 | the `BuildForMaster()` override | no geometry at all in a multithreaded run: the master keeps the example's own run action and never sends |
 | `TrajectoryStream::Enable()` | no trajectories are stored, so every `SendEvent()` sends an empty message and the viewer shows a detector with nothing in it |
 | `TrajectoryStream::SendEvent()` | no tracks on the wire; your own payload still arrives |
@@ -648,7 +648,7 @@ own:
 
 2. **`GrpcRunAction`** (extends `RunAction`)
    Runs B5's own begin-of-run logic first, then hands the geometry over with
-   `GeometryExport::SendForRun()`. **B5's `RunAction` takes the event action in its
+   `GeometryStream::SendForRun()`. **B5's `RunAction` takes the event action in its
    constructor** — its ntuple columns point at vectors the event action owns — so
    this one takes and forwards one too, which is the one place the template's
    signature does not fit as written.

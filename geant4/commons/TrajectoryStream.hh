@@ -1,6 +1,6 @@
 #pragma once
 
-// Same split as GeometryExport.hh: turning the storage on is plain Geant4 and
+// Same split as GeometryStream.hh: turning the storage on is plain Geant4 and
 // works in any build, only the sending half needs gRPC.
 #ifdef RL4PHY_ENABLE_GRPC
 #include "GrpcClient.hh"

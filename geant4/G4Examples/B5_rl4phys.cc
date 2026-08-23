@@ -30,7 +30,7 @@
 #include "G4SystemOfUnits.hh"
 #include "G4VHitsCollection.hh"
 
-#include "GeometryExport.hh"
+#include "GeometryStream.hh"
 #include "GrpcClient.hh"
 #include "TrajectoryStream.hh"
 
@@ -54,8 +54,11 @@ constexpr float kNoHodoscopeTime = -1.f;
 
 
 // Same lookup as in B5/src/EventAction.cc, which keeps its helper file local.
-// The base class warns about a missing collection for the very same Ids, so
-// this one stays quiet and lets the caller substitute a default.
+// A valid collection Id does not guarantee the collection is present in every
+// event, and whether that is worth a warning is the application's call, not
+// this wrapper's: B5's own EventAction already raises one for the very same
+// Ids, so this one stays quiet and lets the caller substitute a default
+// (0 hits, no hodoscope time).
 G4VHitsCollection* GetHC(const G4Event* event, G4int collId)
 {
   if (collId < 0) return nullptr;
@@ -169,7 +172,7 @@ class GrpcEventAction : public EventAction
 // B5 does not keep one detector for the whole job: /B5/detector/armAngle turns
 // the second arm between runs, three times over run1.mac, so the geometry has
 // to go out once per run rather than once at startup - see
-// GeometryExport::SendForRun, which is also where the master-only guard lives.
+// GeometryStream::SendForRun, which is also where the master-only guard lives.
 // Same shape as GrpcEventAction above: the example's own action runs first and
 // this one only adds the send.
 class GrpcRunAction : public RunAction
@@ -184,7 +187,7 @@ class GrpcRunAction : public RunAction
       RunAction::BeginOfRunAction(run);
 
       // Nothing to report on a worker thread, where SendForRun sends nothing.
-      if (auto sent = GeometryExport::SendForRun(fClient)) {
+      if (auto sent = GeometryStream::SendForRun(fClient)) {
         G4cout << "Geometry sent over gRPC: " << sent << " bytes" << G4endl;
       }
     }
@@ -399,7 +402,7 @@ int main(int argc, char** argv)
   {
 
     G4bool written =
-        GeometryExport::WriteToFile(
+        GeometryStream::WriteToFile(
             gdmlFile
         );
 

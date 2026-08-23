@@ -9,7 +9,7 @@
 #include <string>
 
 #ifdef RL4PHY_ENABLE_GDML
-#include "GeometryExport.hh"
+#include "GeometryStream.hh"
 #endif
 
 #ifdef RL4PHY_ENABLE_GRPC
@@ -63,7 +63,7 @@ int main(int argc, char** argv) {
   // side is not here: it belongs to a run, so RunAction::BeginOfRunAction does
   // it, once per /run/beamOn.
   if (!exportGdml.empty() &&
-      GeometryExport::WriteToFile(exportGdml, detector->GetWorldPV())) {
+      GeometryStream::WriteToFile(exportGdml, detector->GetWorldPV())) {
     std::cout << "GDML EXPORTED: " << exportGdml << std::endl;
   }
 #else

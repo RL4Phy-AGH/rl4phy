@@ -9,7 +9,7 @@ project(G4Examples)
 # to build a batch mode only executable
 #
 # gdml is required rather than optional, the same way geant4/MUonE asks for it:
-# commons/GeometryExport.hh is how an example hands its detector to the Python
+# commons/GeometryStream.hh is how an example hands its detector to the Python
 # side, so a Geant4 without it is no use here. Asking for the component also
 # brings Xerces-C into the link, which is what turns a puzzling link failure into
 # a clear message at configure time.

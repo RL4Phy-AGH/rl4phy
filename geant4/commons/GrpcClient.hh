@@ -72,7 +72,7 @@ public:
   }
 
   // Geometry hand-off (issue #18), once per run - see
-  // GeometryExport::SendForRun. Unlike the per-step calls this one waits for the
+  // GeometryStream::SendForRun. Unlike the per-step calls this one waits for the
   // server, because the first of them goes out before the first event of the
   // job and the Python side may still be coming up.
   //

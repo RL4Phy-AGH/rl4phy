@@ -4,7 +4,7 @@
 // half can be missing from a build - see the two options in CMakeLists.txt.
 #ifdef RL4PHY_ENABLE_GDML
 #ifdef RL4PHY_ENABLE_GRPC
-#include "GeometryExport.hh"
+#include "GeometryStream.hh"
 #include "GrpcClient.hh"
 #endif
 #endif
@@ -19,7 +19,7 @@ RunAction::RunAction(GrpcClient* client) : fGrpcClient(client) {}
 // The geometry goes out here rather than once from main because it is what the
 // run's tracks will be drawn on, and a run is where a detector can have changed
 // - MUonE's does not have a command that moves anything, but B5 next door does,
-// and the rule belongs in one place. See GeometryExport::SendForRun, which
+// and the rule belongs in one place. See GeometryStream::SendForRun, which
 // sends on the master thread only; we run single-threaded, so that is this one.
 void RunAction::BeginOfRunAction(const G4Run*) {
 #ifdef RL4PHY_ENABLE_GDML
@@ -28,7 +28,7 @@ void RunAction::BeginOfRunAction(const G4Run*) {
   // exactly the one DetectorConstruction returned, whether it was built in code
   // or read from a GDML file, so there is nothing to carry around for it.
   if (fGrpcClient) {
-    if (auto sent = GeometryExport::SendForRun(*fGrpcClient)) {
+    if (auto sent = GeometryStream::SendForRun(*fGrpcClient)) {
       std::cout << "GDML SENT OVER GRPC: " << sent << " bytes" << std::endl;
     }
   }

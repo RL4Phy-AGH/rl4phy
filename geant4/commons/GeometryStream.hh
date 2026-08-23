@@ -29,13 +29,13 @@
 // the way out is unavoidable. Everything around it lives here so that no entry
 // point has to know about it:
 //
-//   GeometryExport::SendForRun(client)     from BeginOfRunAction, once per run
-//   GeometryExport::SendOverGrpc(client)   write, send, clean up
-//   GeometryExport::WriteToFile(path)      explicit on-disk export
+//   GeometryStream::SendForRun(client)     from BeginOfRunAction, once per run
+//   GeometryStream::SendOverGrpc(client)   write, send, clean up
+//   GeometryStream::WriteToFile(path)      explicit on-disk export
 //
 // Kept out of GrpcClient.hh on purpose: that one is included from the per-step
 // hot path, which has no business pulling in GDML and Xerces.
-namespace GeometryExport
+namespace GeometryStream
 {
 
 namespace detail
@@ -171,4 +171,4 @@ inline std::size_t SendForRun(GrpcClient& client, const G4VPhysicalVolume* world
 
 #endif  // RL4PHY_ENABLE_GRPC
 
-}  // namespace GeometryExport
+}  // namespace GeometryStream

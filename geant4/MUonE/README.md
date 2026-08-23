@@ -15,10 +15,10 @@ C++; GDML is the export, not the source.
 - `main.cc`: flags `--export-gdml <file>` (write geometry to GDML),
   `--gdml <file>` (import instead of the C++ build), `--vis [macro]`, `<macro>`.
 - `src/RunAction.*`: prints the `STEP` column header, and hands the geometry to
-  the Python side once per `/run/beamOn` via `commons/GeometryExport.hh`. Per run
+  the Python side once per `/run/beamOn` via `commons/GeometryStream.hh`. Per run
   and not once from `main` because the geometry is what the run's tracks get
   drawn on, and a UI command between runs can have moved it — B5 next door has
-  exactly such a command. `GeometryExport::SendForRun()` sends on the master
+  exactly such a command. `GeometryStream::SendForRun()` sends on the master
   thread only, which here is the only thread there is.
 - `src/SteppingAction.*`: one `STEP` line per step with the track's position,
   momentum, energy, time and the process (column header from `RunAction`).

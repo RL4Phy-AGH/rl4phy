@@ -1,16 +1,20 @@
 #----------------------------------------------------------------------------
 # RL4PhyExample - one function to turn a vendored Geant4 example into an
-# RL4PHYS application.
+# RL4PHYS application:
 #
-#   rl4phy_add_example(B5)
+#   rl4phy_add_example(<Name>)
 #
 # expects, next to the calling CMakeLists.txt:
 #
-#   B5/           the untouched upstream example (src/, include/, macros)
-#   B5_rl4phys.cc our entry point, built against B5/include and geant4/commons
+#   <Name>/           the untouched upstream example (src/, include/, macros)
+#   <Name>_rl4phys.cc our entry point, built against <Name>/include and
+#                     geant4/commons
 #
-# and produces the executable B5_rl4phys with the example's macros copied to
-# <build>/B5/ so it can be run straight from the build directory.
+# and produces the executable <Name>_rl4phys with the example's macros copied
+# to <build>/<Name>/ so it can be run straight from the build directory.
+#
+# For example, rl4phy_add_example(B5) takes B5/ and B5_rl4phys.cc, builds
+# B5_rl4phys and copies B5/run1.mac and friends to <build>/B5/.
 #
 # Headers are added per target, never globally: B1 and B5 both ship a
 # DetectorConstruction.hh, EventAction.hh, RunAction.hh, ActionInitialization.hh
