@@ -25,8 +25,10 @@ The integration subclasses the example's user actions in `<Name>_rl4phys.cc` and
 never touches `<Name>/`. Two reasons:
 
 - the copy in the repo can be diffed against the upstream release at any time;
-- a newer Geant4 drops in as a copy, not a merge — what breaks is our one file,
-  at compile time.
+- if a new Geant4 version changes the example, we overwrite `<Name>/` with the
+  new copy and adjust only our side: `<Name>_rl4phys.cc`, and the proto if the
+  example's output changed. Anything that broke shows up there as a compile
+  error.
 
 Every override calls the base class first, then adds the gRPC part:
 
