@@ -71,8 +71,9 @@ void SendTrajectories(const rl4phys::EventTrajectories& trajectories);
 bool SendGeometry(const std::string& gdmlContent);
 ```
 
-Examples hold no protobuf stub of their own; a new payload gets a
-`Send<Payload>()` here. Two ownership rules:
+All examples send through this one class. To add a message type, add a
+`Send<Payload>()` here instead of calling gRPC from the example. Two ownership
+rules:
 
 - **One client per thread.** The channel is shared, the client is not. `main`
   creates the channel, each action object builds its own client — and `Build()`
