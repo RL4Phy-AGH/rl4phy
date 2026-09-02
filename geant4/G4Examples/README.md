@@ -78,10 +78,12 @@ rules:
 - **One client per thread.** The channel is shared, the client is not. `main`
   creates the channel, each action object builds its own client — and `Build()`
   runs once per worker thread, so that is one client per thread by construction.
-- **The client outlives the run.** `SendGeometry` waits up to 30 s for the
-  receiver on the first failure and never again, but the latch is a member of the
-  client, so a fresh client per run pays the 30 s again every run. Hold the
-  client as a member of the action.
+- **Keep one client for the whole job.** The first `SendGeometry` of a job waits
+  up to 30 s for the Python receiver, which may still be starting. If it does not
+  show up, the client remembers that and later runs fail immediately instead of
+  waiting again. The flag lives inside the `GrpcClient` object, so a new client
+  every run would wait 30 s every run: hold the client as a member of the run
+  action.
 
 ### `GeometryStream.hh` — the detector
 
