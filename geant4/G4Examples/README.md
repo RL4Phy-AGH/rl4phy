@@ -1,7 +1,7 @@
 # Connecting Geant4 examples to RL4PHYS (gRPC)
 
 How to add a Geant4 example so that it runs exactly as upstream wrote it and
-streams its results over gRPC to the Python receiver, which draws them in Rerun.
+streams its results over gRPC to the Python receiver, which visualises them in Rerun.
 **B1** and **B5** at the end are this guide applied.
 
 ## What an integration consists of
