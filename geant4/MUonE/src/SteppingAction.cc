@@ -1,7 +1,4 @@
 #include "SteppingAction.hh"
-#ifdef RL4PHY_ENABLE_GRPC
-#include "GrpcClient.hh"
-#endif
 #include "G4Step.hh"
 #include "G4StepPoint.hh"
 #include "G4Track.hh"
@@ -15,10 +12,11 @@
 #include "G4SystemOfUnits.hh"
 #include <iostream>
 
-SteppingAction::SteppingAction(GrpcClient* client) : fGrpcClient(client) {}
-
 // One STEP line per step, but only inside the stations: Air and World steps are
 // not detector data. Read at the pre-step point; column order lives in RunAction.
+//
+// Console only. What goes over gRPC is the event's trajectories, sent whole from
+// EventAction, so nothing here has to be filtered for the picture's sake.
 void SteppingAction::UserSteppingAction(const G4Step* step) {
   if (!fStationLV) {
     fStationLV = G4LogicalVolumeStore::GetInstance()->GetVolume("Station");
@@ -35,41 +33,15 @@ void SteppingAction::UserSteppingAction(const G4Step* step) {
   const int eventID =
       G4EventManager::GetEventManager()->GetConstCurrentEvent()->GetEventID();
 
-  const double x_mm = pos.x() / mm;
-  const double y_mm = pos.y() / mm;
-  const double z_mm = pos.z() / mm;
-  const double px_MeV = p.x() / MeV;
-  const double py_MeV = p.y() / MeV;
-  const double pz_MeV = p.z() / MeV;
-  const double e_kin_MeV = pre->GetKineticEnergy() / MeV;
-
-#ifdef RL4PHY_ENABLE_GRPC
-  if (fGrpcClient) {
-    rl4phys::StepHit hit;
-    hit.set_x(static_cast<float>(x_mm));
-    hit.set_y(static_cast<float>(y_mm));
-    hit.set_z(static_cast<float>(z_mm));
-    hit.set_px(static_cast<float>(px_MeV));
-    hit.set_py(static_cast<float>(py_MeV));
-    hit.set_pz(static_cast<float>(pz_MeV));
-    hit.set_e_kin(static_cast<float>(e_kin_MeV));
-    hit.set_track_id(track->GetTrackID());
-    hit.set_event_id(eventID);
-    hit.set_parent_id(track->GetParentID());
-    hit.set_pdg(track->GetDefinition()->GetPDGEncoding());
-    fGrpcClient->SendStepHit(hit);
-  }
-#endif
-
   std::cout << "STEP "
             << eventID << ' '
             << track->GetTrackID() << ' '
             << track->GetParentID() << ' '
             << track->GetDefinition()->GetParticleName() << ' '
-            << x_mm << ' ' << y_mm << ' ' << z_mm << ' '
-            << px_MeV << ' ' << py_MeV << ' ' << pz_MeV << ' '
+            << pos.x() / mm << ' ' << pos.y() / mm << ' ' << pos.z() / mm << ' '
+            << p.x() / MeV << ' ' << p.y() / MeV << ' ' << p.z() / MeV << ' '
             << pre->GetTotalEnergy() / MeV << ' '
-            << e_kin_MeV << ' '
+            << pre->GetKineticEnergy() / MeV << ' '
             << pre->GetGlobalTime() / ns << ' '
             << step->GetStepLength() / mm << ' '
             << vol->GetName() << ' '
