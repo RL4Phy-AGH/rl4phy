@@ -131,7 +131,8 @@ private:
   void CloseStream() {
     if (!fWriter) return;
     fWriter->WritesDone();
-    Report(fWriter->Finish(&fStreamReply, &fStreamCtx));
+    // Reply was passed to SendDataStream(); Finish() takes no args in this gRPC.
+    Report(fWriter->Finish());
     fWriter.reset();
   }
 
