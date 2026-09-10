@@ -16,6 +16,11 @@ public:
   explicit GrpcClient(std::shared_ptr<grpc::Channel> channel)
       : fStub(rl4phys::SendService::NewStub(std::move(channel))) {}
 
+  ~GrpcClient() { CloseStream(); }
+
+  GrpcClient(const GrpcClient&) = delete;
+  GrpcClient& operator=(const GrpcClient&) = delete;
+
   void SendEventScoring(float edep_MeV, int event_id) {
     rl4phys::Data packet;
     auto* scoring = packet.mutable_event_scoring();
@@ -119,12 +124,26 @@ public:
   }
 
 private:
-  // Every payload goes out the same way: one unary call, no retry, no waiting
-  // for the server to come up.
+  void OpenStream() {
+    fWriter = fStub->SendDataStream(&fStreamCtx, &fStreamReply);
+  }
+
+  void CloseStream() {
+    if (!fWriter) return;
+    fWriter->WritesDone();
+    // Reply was passed to SendDataStream(); Finish() takes no args in this gRPC.
+    Report(fWriter->Finish());
+    fWriter.reset();
+  }
+
+  // First Send opens the stream; destructor closes it.
   void Send(const rl4phys::Data& packet) {
-    rl4phys::Reply reply;
-    grpc::ClientContext context;
-    Report(fStub->SendData(&context, packet, &reply));
+    if (!fWriter) OpenStream();
+    if (!fWriter->Write(packet) && !fWarned) {
+      fWarned = true;
+      std::cerr << "gRPC stream write failed."
+                << std::endl;
+    }
   }
 
   // The per-step senders are fire-and-forget, but a dead server would otherwise
@@ -137,6 +156,9 @@ private:
   }
 
   std::unique_ptr<rl4phys::SendService::Stub> fStub;
+  grpc::ClientContext fStreamCtx;
+  rl4phys::Reply fStreamReply;
+  std::unique_ptr<grpc::ClientWriter<rl4phys::Data>> fWriter;
   bool fWarned = false;
   bool fGeometryFailed = false;
 };
