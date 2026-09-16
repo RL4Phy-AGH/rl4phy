@@ -106,7 +106,9 @@ class _Walk:
     solids: list[PlacedSolid] = field(default_factory=list)
     # Tessellating the same solid once per copy is the difference between a
     # snappy load and a stalled server: B5 has 17 solids and 976 placements.
-    meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = field(default_factory=dict)
+    meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = field(
+        default_factory=dict
+    )
     vertices: int = 0
 
 
@@ -299,7 +301,9 @@ def _replica_placements(replica) -> list[tuple[int, np.ndarray]]:
     return placements
 
 
-def _parameterised_placements(param) -> list[tuple[int, np.ndarray, np.ndarray, object]]:
+def _parameterised_placements(
+    param,
+) -> list[tuple[int, np.ndarray, np.ndarray, object]]:
     dimensions = getattr(param, "paramData", None)
     placements = []
     for index, transform in enumerate(param.transforms):
@@ -398,5 +402,7 @@ def parse_gdml(path: str) -> list[PlacedSolid]:
     if len(walk.solids) >= MAX_SOLIDS:
         print(f"Geometry hit the {MAX_SOLIDS} solid cap; the rest is not shown")
     if walk.vertices >= MAX_MESH_VERTICES:
-        print(f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing")
+        print(
+            f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing"
+        )
     return walk.solids

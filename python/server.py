@@ -9,9 +9,7 @@ from concurrent import futures
 from typing import NamedTuple
 
 import grpc
-
 import numpy as np
-
 import rerun as rr
 
 import rl4phy_pb2
