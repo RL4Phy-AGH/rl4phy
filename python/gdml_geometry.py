@@ -35,6 +35,7 @@ from dataclasses import dataclass, field
 
 import numpy as np
 import pyg4ometry.gdml as gdml
+from loguru import logger
 
 Vec3 = tuple[float, float, float]
 QuaternionXYZW = tuple[float, float, float, float]
@@ -106,7 +107,9 @@ class _Walk:
     solids: list[PlacedSolid] = field(default_factory=list)
     # Tessellating the same solid once per copy is the difference between a
     # snappy load and a stalled server: B5 has 17 solids and 976 placements.
-    meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = field(default_factory=dict)
+    meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = field(
+        default_factory=dict
+    )
     vertices: int = 0
 
 
@@ -182,7 +185,9 @@ def _tessellate(solid, walk: _Walk) -> tuple[np.ndarray, np.ndarray] | None:
     try:
         vertices, polygons, _ = solid.mesh().toVerticesAndPolygons()
     except Exception as exc:
-        print(f"Could not tessellate {_clean(solid.name)!r} ({exc!r}), skipping it")
+        logger.warning(
+            f"Could not tessellate {_clean(solid.name)!r} ({exc!r}), skipping it"
+        )
         walk.meshes[solid.name] = None
         return None
 
@@ -281,7 +286,7 @@ def _replica_placements(replica) -> list[tuple[int, np.ndarray]]:
     """
     axis = _REPLICA_AXIS_INDEX.get(replica.axis)
     if axis is None:
-        print(
+        logger.warning(
             f"Replica {_clean(replica.name)!r} divides along axis {replica.axis} "
             "(rho/phi), which is not supported yet; skipping it"
         )
@@ -299,7 +304,9 @@ def _replica_placements(replica) -> list[tuple[int, np.ndarray]]:
     return placements
 
 
-def _parameterised_placements(param) -> list[tuple[int, np.ndarray, np.ndarray, object]]:
+def _parameterised_placements(
+    param,
+) -> list[tuple[int, np.ndarray, np.ndarray, object]]:
     dimensions = getattr(param, "paramData", None)
     placements = []
     for index, transform in enumerate(param.transforms):
@@ -396,7 +403,11 @@ def parse_gdml(path: str) -> list[PlacedSolid]:
     _descend(world, world_name, np.eye(3), np.zeros(3), walk)
 
     if len(walk.solids) >= MAX_SOLIDS:
-        print(f"Geometry hit the {MAX_SOLIDS} solid cap; the rest is not shown")
+        logger.warning(
+            f"Geometry hit the {MAX_SOLIDS} solid cap; the rest is not shown"
+        )
     if walk.vertices >= MAX_MESH_VERTICES:
-        print(f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing")
+        logger.warning(
+            f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing"
+        )
     return walk.solids
