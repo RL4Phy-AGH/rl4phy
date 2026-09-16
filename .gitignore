@@ -3,3 +3,5 @@ geant4/build/
 python/rl4phy_pb2.py
 python/rl4phy_pb2_grpc.py
 python/__pycache__/
+.venv/
+.ruff_cache/

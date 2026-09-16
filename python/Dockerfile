@@ -1,6 +1,12 @@
 FROM python:3.11-slim
 
-ENV PYTHONUNBUFFERED=1
+COPY --from=ghcr.io/astral-sh/uv:0.9.8 /uv /uvx /bin/
+
+ENV PYTHONUNBUFFERED=1 \
+    UV_COMPILE_BYTECODE=1 \
+    UV_LINK_MODE=copy \
+    UV_PROJECT_ENVIRONMENT=/app/python/.venv \
+    PATH=/app/python/.venv/bin:$PATH
 
 # pyg4ometry links against OpenGL/X11 even headless (OpenCascade + VTK).
 RUN apt-get update \
@@ -11,15 +17,15 @@ RUN apt-get update \
        libxext6 \
     && rm -rf /var/lib/apt/lists/*
 
-WORKDIR /app
+WORKDIR /app/python
 
-COPY python/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+# Dependencies first, so a source-only change does not re-resolve the lock.
+COPY python/pyproject.toml python/uv.lock python/.python-version ./
+RUN uv sync --frozen --no-dev
 
 COPY proto/ /app/proto/
 COPY python/ /app/python/
 
-WORKDIR /app/python
 RUN python -m grpc_tools.protoc \
     -I/app/proto \
     --python_out=/app/python \

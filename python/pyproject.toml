@@ -1,0 +1,34 @@
+[project]
+name = "rl4phy-python"
+version = "0.1.0"
+description = "gRPC server that turns Geant4 geometry and steps into Rerun recordings"
+requires-python = ">=3.11"
+dependencies = [
+    "grpcio>=1.62.0",
+    "grpcio-tools>=1.62.0",
+    "loguru>=0.7.3",
+    "numpy>=1.26.0",
+    "protobuf>=4.25.0",
+    "pyg4ometry>=1.4.0",
+    "rerun-sdk>=0.26.0",
+]
+
+[dependency-groups]
+dev = ["ruff>=0.14.0"]
+
+[tool.uv]
+package = false
+
+[tool.ruff]
+line-length = 88
+extend-exclude = ["rl4phy_pb2.py", "rl4phy_pb2_grpc.py"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle
+    "F",    # pyflakes
+    "I",    # isort - imports at the top, grouped and sorted
+    "T20",  # flake8-print - no print(), use loguru
+    "UP",   # pyupgrade - includes UP031/UP032, f-strings over % and .format
+    "B",    # flake8-bugbear
+]
