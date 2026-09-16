@@ -14,15 +14,17 @@ uv reads `.python-version` (3.11, matching the image) and fetches that
 interpreter if it is missing. Nothing needs activating - prefix commands with
 `uv run`.
 
-Then generate the gRPC stubs. `rl4phy_pb2.py` and `rl4phy_pb2_grpc.py` are
-build outputs, not sources: they are gitignored, so a fresh checkout has none
-and `server.py` fails with `No module named rl4phy_pb2` until this has run.
-Re-run it whenever `proto/rl4phy.proto` changes.
+`rl4phy_pb2.py` and `rl4phy_pb2_grpc.py` are generated from
+`proto/rl4phy.proto` but committed, so a checkout runs without a build step and
+ruff sorts their imports the same way here and in CI. Regenerate and commit them
+whenever the proto changes:
 
 ```sh
 uv run python -m grpc_tools.protoc -I../proto \
     --python_out=. --grpc_python_out=. ../proto/rl4phy.proto
 ```
+
+They are excluded from ruff in `pyproject.toml`; never edit them by hand.
 
 ```sh
 uv run server.py         # run the server
