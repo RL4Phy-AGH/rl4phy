@@ -1,4 +1,5 @@
 import grpc
+from loguru import logger
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
@@ -42,4 +43,4 @@ b5 = rl4phy_pb2.Data(
     )
 )
 stub.SendData(b5)
-print("Sent B1 + MUonE + B5 test messages")
+logger.info("Sent B1 + MUonE + B5 test messages")

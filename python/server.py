@@ -11,6 +11,7 @@ from typing import NamedTuple
 import grpc
 import numpy as np
 import rerun as rr
+from loguru import logger
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
@@ -186,7 +187,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
 
             if kind == "event_scoring":
                 s = request.event_scoring
-                print(
+                logger.info(
                     f"[{self.msg}] B1 event_scoring: event={s.event_id} "
                     f"edep = {s.edep:.6f} MeV"
                 )
@@ -197,7 +198,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             elif kind == "event_trajectories":
                 self._log_event_trajectories(request.event_trajectories)
             else:
-                print(f"[{self.msg}] unknown payload")
+                logger.warning(f"[{self.msg}] unknown payload")
 
         return rl4phy_pb2.Reply()
 
@@ -314,7 +315,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
 
         species = Counter(t.species for t in tracks)
         tally = ", ".join(f"{n} {name}" for name, n in species.most_common())
-        print(
+        logger.info(
             f"[{self.msg}] tracks: event={event_id} (index {slot})  "
             f"{len(tracks)} track(s), {len(points)} point(s)  "
             f"[{tally}]"
@@ -334,7 +335,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         hodoscope_times = ", ".join(
             "none" if t < 0.0 else f"{t:.2f}" for t in event.hodoscope_time
         )
-        print(
+        logger.info(
             f"[{self.msg}] B5 b5_event: event={event.event_id}  "
             f"chamber hits = [{chamber_hits}]  "
             f"hodoscope t = [{hodoscope_times}] ns  "
@@ -373,15 +374,15 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
 
     def SendGeometry(self, request, context):
         with self._lock:
-            print(f"Received GDML over gRPC: {len(request.gdml)} bytes")
+            logger.info(f"Received GDML over gRPC: {len(request.gdml)} bytes")
             try:
                 solids = _parse_received_gdml(request.gdml)
             except Exception as exc:
-                print(f"Could not parse the GDML received over gRPC: {exc!r}")
+                logger.error(f"Could not parse the GDML received over gRPC: {exc!r}")
                 return rl4phy_pb2.Reply()
 
             if not solids:
-                print("GDML received over gRPC has no drawable volumes")
+                logger.warning("GDML received over gRPC has no drawable volumes")
                 return rl4phy_pb2.Reply()
 
             # Where the next event will land, which is where geometry has to go
@@ -390,7 +391,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             # B5/run1.mac ends at the arm angle it started at, and skipping the
             # log would resolve its last run back to the geometry before it.
             slot = self._events_seen
-            print(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
+            logger.info(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
             log_detector(solids, slot)
         return rl4phy_pb2.Reply()
 
@@ -403,8 +404,8 @@ def watch_and_flush_tracks(servicer: AgentServer) -> None:
 
 def start_server():
     server_uri = rr.serve_grpc(grpc_port=RERUN_GRPC_PORT)
-    print(f"Rerun gRPC server on port {RERUN_GRPC_PORT} ({server_uri})")
-    print(
+    logger.info(f"Rerun gRPC server on port {RERUN_GRPC_PORT} ({server_uri})")
+    logger.info(
         "Connect the viewer with: "
         f"rerun --connect rerun+http://127.0.0.1:{RERUN_GRPC_PORT}/proxy"
     )
@@ -420,7 +421,7 @@ def start_server():
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(servicer, server)
     server.add_insecure_port("0.0.0.0:50051")
     server.start()
-    print("Listening on port 50051, waiting for Geant4 data...")
+    logger.info("Listening on port 50051, waiting for Geant4 data...")
 
     threading.Thread(
         target=watch_and_flush_tracks, args=(servicer,), daemon=True
