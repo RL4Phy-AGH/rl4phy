@@ -68,17 +68,22 @@ pip install -r python/requirements-ml.txt
 
 cd python
 python -m pytest rl4phy_env/
-python -m rl4phy_env.demo_random_agent --dataset ../datasets
+python -m rl4phy_env.benchmark --dataset ../datasets
 ```
 
-`demo_random_agent.py` scores three policies on the same episodes: uniform random
-actions, persistence (predict that the particle stays where it is), and drift
-(persistence plus a constant step along z, its length averaged over the evaluated
-tracks). Errors are reported split into a transverse `(x, y)` and a longitudinal
-`(z)` part. persistence is the first benchmark number for the project — the
-cheapest possible surrogate, and the bar a trained model has to clear. drift fits
-its single parameter on the tracks it is scored on, so its number is a lower
-bound for a constant-step model rather than a held-out result.
+`benchmark.py` scores the agents from `agents/` on the same episodes: uniform
+random actions, persistence (predict that the particle stays where it is), and
+drift (persistence plus a constant step along z, its length averaged over the
+evaluated tracks). Errors are reported split into a transverse `(x, y)` and a
+longitudinal `(z)` part. persistence is the first benchmark number for the
+project — the cheapest possible surrogate, and the bar a trained model has to
+clear. drift fits its single parameter on the tracks it is scored on, so its
+number is a lower bound for a constant-step model rather than a held-out result.
+
+Each agent lives in its own file under `agents/` and is a plain class with a
+`name` and an `act(observation) -> (x, y, z)` method; there is no base class to
+inherit from. To try your own model, copy one of those files, implement `act`,
+and add an instance to the `agents` tuple in `benchmark.py`.
 
 ```python
 import gymnasium
