@@ -3,8 +3,8 @@
 Opt-in through the RL4PHY_DATASET_DIR environment variable: when it points at a
 writable directory the server dumps every StepHit it receives into
 ``<dir>/steps-<unix-ts>-<pid>.parquet``, one file per server run. With the
-variable unset (the default) nothing is imported and nothing is written, so the
-gRPC path behaves exactly as before.
+variable unset (the default) nothing is written, so the gRPC path behaves
+exactly as before.
 
 The recorded files are the input of ``python/rl4phy_env``, which replays them as
 RL episodes.
@@ -17,6 +17,9 @@ import os
 import signal
 import threading
 import time
+
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 ENV_DATASET_DIR = "RL4PHY_DATASET_DIR"
 DEFAULT_FLUSH_ROWS = 1000
@@ -37,8 +40,6 @@ STEP_COLUMNS = _ID_COLUMNS + _KINEMATIC_COLUMNS + (_ORDER_COLUMN,)
 
 
 def step_schema():
-    import pyarrow as pa
-
     fields = [pa.field(name, pa.int32()) for name in _ID_COLUMNS]
     fields += [pa.field(name, pa.float32()) for name in _KINEMATIC_COLUMNS]
     # A long run can outgrow int32; the ids cannot.
@@ -49,9 +50,6 @@ def step_schema():
 class ParquetStepWriter:
     """Buffered parquet writer for StepHit messages.
 
-    pyarrow is imported here rather than at module scope so that a server run
-    without RL4PHY_DATASET_DIR never pays for it.
-
     A parquet file only becomes readable once its footer is written, and the
     footer is written by ``close()``. The ordinary exits are covered -- atexit,
     and the SIGTERM that ``docker stop`` sends -- but a SIGKILL, a segfault or a
@@ -61,8 +59,6 @@ class ParquetStepWriter:
     """
 
     def __init__(self, directory: str, flush_rows: int = DEFAULT_FLUSH_ROWS) -> None:
-        import pyarrow.parquet as pq
-
         os.makedirs(directory, exist_ok=True)
         # The pid keeps two servers started in the same second apart.
         name = f"steps-{int(time.time())}-{os.getpid()}.parquet"
@@ -97,8 +93,6 @@ class ParquetStepWriter:
     def _flush_locked(self) -> None:
         if self._buffered == 0:
             return
-        import pyarrow as pa
-
         batch = pa.record_batch(
             [
                 pa.array(self._buffer[field.name], type=field.type)
