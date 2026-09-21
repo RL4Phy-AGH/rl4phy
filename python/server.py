@@ -271,26 +271,29 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         # None unless RL4PHY_DATASET_DIR is set; see dataset_writer.py.
         self._dataset = maybe_create_step_writer()
 
-    def SendData(self, request, context):
+    def _handle_data(self, request) -> None:
+        self.msg += 1
+        kind = request.WhichOneof("payload")
+
+        if kind == "event_scoring":
+            s = request.event_scoring
+            print(
+                f"[{self.msg}] B1 event_scoring: event={s.event_id} "
+                f"edep = {s.edep:.6f} MeV"
+            )
+        elif kind == "step_hit":
+            self._log_step_hit(request.step_hit)
+        elif kind == "b5_event":
+            self._log_b5_event(request.b5_event)
+        elif kind == "event_trajectories":
+            self._log_event_trajectories(request.event_trajectories)
+        else:
+            print(f"[{self.msg}] unknown payload")
+
+    def SendDataStream(self, request_iterator, context):
         with self._lock:
-            self.msg += 1
-            kind = request.WhichOneof("payload")
-
-            if kind == "event_scoring":
-                s = request.event_scoring
-                print(
-                    f"[{self.msg}] B1 event_scoring: event={s.event_id} "
-                    f"edep = {s.edep:.6f} MeV"
-                )
-            elif kind == "step_hit":
-                self._log_step_hit(request.step_hit)
-            elif kind == "b5_event":
-                self._log_b5_event(request.b5_event)
-            elif kind == "event_trajectories":
-                self._log_event_trajectories(request.event_trajectories)
-            else:
-                print(f"[{self.msg}] unknown payload")
-
+            for request in request_iterator:
+                self._handle_data(request)
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:

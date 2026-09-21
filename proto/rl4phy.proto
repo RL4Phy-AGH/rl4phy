@@ -100,6 +100,7 @@ message GeometryFile
 
 service SendService
 {
-    rpc SendData (Data) returns (Reply) {}
+    // Client opens one stream, many Data writes with one Reply.
+    rpc SendDataStream (stream Data) returns (Reply) {}
     rpc SendGeometry (GeometryFile) returns (Reply) {}
 }
