@@ -15,4 +15,21 @@ muon = rl4phy_pb2.Data(
     )
 )
 stub.SendData(muon)
-print("Sent B1 + MUonE test messages")
+
+# Every calorimeter cell is sent, empty ones included: 80 EM, 20 hadronic.
+em_cal_edep = [0.0] * 80
+em_cal_edep[42:45] = [12.5, 48.0, 21.3]
+had_cal_edep = [0.0] * 20
+had_cal_edep[7:9] = [3.1, 7.9]
+
+b5 = rl4phy_pb2.Data(
+    b5_event=rl4phy_pb2.B5Event(
+        event_id=7,
+        drift_chamber_hits=[5, 4],
+        hodoscope_time=[3.21, 11.75],
+        em_cal_edep=em_cal_edep,
+        had_cal_edep=had_cal_edep,
+    )
+)
+stub.SendData(b5)
+print("Sent B1 + MUonE + B5 test messages")

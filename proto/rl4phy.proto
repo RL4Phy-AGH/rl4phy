@@ -9,7 +9,11 @@ message EventScoring
     int32 event_id = 2;
 }
 
-// MUonE: one step inside a station volume
+// One step of one track, with the momentum and energy a trajectory point does
+// not carry. No example sends this any more: MUonE and B5 both draw from
+// EventTrajectories below, which is what Geant4's viewer draws and costs one
+// message per event instead of one per step. Kept because it is the only way to
+// get per-step kinematics over the wire, should we ever want them.
 message StepHit
 {
     float x = 1;
@@ -25,6 +29,51 @@ message StepHit
     int32 pdg = 11;
 }
 
+// B5: double arm spectrometer, one event summarised after all hits are collected
+message B5Event
+{
+    // Not a unique key: it restarts at 0 on every /run/beamOn and multithreaded
+    // runs deliver events out of order.
+    int32 event_id = 1;
+    // Two values per arm-indexed field: chamber 1/2, hodoscope 1/2. An arm the
+    // particle missed reports 0 hits and a hodoscope time of -1.
+    repeated int32 drift_chamber_hits = 2;
+    repeated float hodoscope_time = 3;  // time of the first hit, ns
+    // Every cell of every event, MeV, empty ones included: 80 EM cells
+    // (kNofEmCells), 20 hadronic (kNofHadCells). Both index as
+    // column * rows + row, so they reshape to (20, 4) and (10, 2).
+    repeated float em_cal_edep = 4;
+    repeated float had_cal_edep = 5;
+}
+
+// One tracked particle, as Geant4's own viewer draws it: the polyline it left
+// behind plus the identity that decides its colour. Built from G4Trajectory, so
+// what arrives here is the same object /vis/scene/add/trajectories renders.
+message Trajectory
+{
+    int32 track_id = 1;
+    int32 parent_id = 2;  // 0 for a primary; otherwise the track that made this one
+    int32 pdg = 3;
+    float charge = 4;             // in units of e, so drawByCharge is reproducible
+    string particle_name = 5;     // Geant4's own name, e.g. "e-", "gamma", "anti_nu_mu"
+    // Point coordinates in mm, flattened as x,y,z triples: the length is always
+    // a multiple of 3. Flat rather than a repeated message because a shower
+    // event carries hundreds of thousands of these and proto3 packs scalars.
+    repeated float points = 6;
+    float initial_e_kin = 7;  // kinetic energy at the start of the track, MeV
+}
+
+// Every trajectory of one event, sent once its stepping is over. One message
+// per event rather than one per step: this is what the viewer draws, and a
+// trajectory is only meaningful whole.
+message EventTrajectories
+{
+    // Same warning as B5Event.event_id: not a unique key, it restarts at 0 on
+    // every /run/beamOn, so the receiver has to number events itself.
+    int32 event_id = 1;
+    repeated Trajectory trajectories = 2;
+}
+
 //Oneof types defined in payload
 message Data
 {
@@ -32,13 +81,18 @@ message Data
     {
         EventScoring event_scoring = 1;
         StepHit step_hit = 2;
+        B5Event b5_event = 3;
+        EventTrajectories event_trajectories = 4;
     }
 }
 
 message Reply {}
 
-// One-off geometry hand-off (issue #18): the exported GDML is sent once at
-// startup, before any step data.
+// Geometry hand-off (issue #18): the exported GDML, sent at the start of every
+// /run/beamOn and before that run's event data. Once per run rather than once
+// per job because a UI command can move the detector between runs, as B5's
+// /B5/detector/armAngle does three times over B5/run1.mac; a single hand-off
+// would leave most of a run's events drawn on a detector they never saw.
 message GeometryFile
 {
     bytes gdml = 1;

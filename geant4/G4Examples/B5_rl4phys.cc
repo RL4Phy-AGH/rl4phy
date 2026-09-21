@@ -1,0 +1,485 @@
+//
+// ********************************************************************
+// * Main program of the B5 example (batch only) adapted for RL4PHYS  *
+// ********************************************************************
+//
+
+#include "ActionInitialization.hh"
+#include "Constants.hh"
+#include "DetectorConstruction.hh"
+#include "EventAction.hh"
+#include "HodoscopeHit.hh"
+#include "PrimaryGeneratorAction.hh"
+#include "RunAction.hh"
+
+#include "G4RunManagerFactory.hh"
+#include "G4MTRunManager.hh"
+#include "G4RunManager.hh"
+
+#include "G4SteppingVerbose.hh"
+#include "G4UImanager.hh"
+
+#include "FTFP_BERT.hh"
+#include "G4StepLimiterPhysics.hh"
+
+#include "Randomize.hh"
+
+#include "G4Event.hh"
+#include "G4HCofThisEvent.hh"
+#include "G4SDManager.hh"
+#include "G4SystemOfUnits.hh"
+#include "G4VHitsCollection.hh"
+
+#include "GeometryStream.hh"
+#include "GrpcClient.hh"
+#include "TrajectoryStream.hh"
+
+#include <grpcpp/grpcpp.h>
+
+#include <algorithm>
+#include <array>
+#include <cstring>
+#include <cstdlib>
+#include <limits>
+#include <memory>
+
+
+using namespace B5;
+
+
+namespace {
+
+// Reported when a hodoscope saw no hit at all in the event.
+constexpr float kNoHodoscopeTime = -1.f;
+
+
+// Same lookup as in B5/src/EventAction.cc, which keeps its helper file local.
+// A valid collection Id does not guarantee the collection is present in every
+// event, and whether that is worth a warning is the application's call, not
+// this wrapper's: B5's own EventAction already raises one for the very same
+// Ids, so this one stays quiet and lets the caller substitute a default
+// (0 hits, no hodoscope time).
+G4VHitsCollection* GetHC(const G4Event* event, G4int collId)
+{
+  if (collId < 0) return nullptr;
+
+  auto hce = event->GetHCofThisEvent();
+  if (!hce) return nullptr;
+
+  return hce->GetHC(collId);
+}
+
+}  // namespace
+
+
+class GrpcEventAction : public EventAction
+{
+  public:
+    explicit GrpcEventAction(std::shared_ptr<grpc::Channel> channel)
+      : fClient(std::move(channel))
+    {}
+
+    void BeginOfEventAction(const G4Event* event) override
+    {
+      EventAction::BeginOfEventAction(event);
+
+      // The base class resolves these Ids too but keeps them private, so they
+      // are looked up once more here (once per worker thread). The names have
+      // to stay in sync with B5/src/EventAction.cc.
+      if (fHodHCID[0] < 0) {
+        auto sdManager = G4SDManager::GetSDMpointer();
+
+        const std::array<G4String, kDim> hodName = {
+          {"hodoscope1/hodoscopeColl", "hodoscope2/hodoscopeColl"}};
+        const std::array<G4String, kDim> driftName = {
+          {"chamber1/driftChamberColl", "chamber2/driftChamberColl"}};
+
+        for (G4int iDet = 0; iDet < kDim; ++iDet) {
+          fHodHCID[iDet] = sdManager->GetCollectionID(hodName[iDet]);
+          fDriftHCID[iDet] = sdManager->GetCollectionID(driftName[iDet]);
+        }
+      }
+    }
+
+    void EndOfEventAction(const G4Event* event) override
+    {
+      // The example fills its histograms, ntuple and the per cell energies
+      // here, so it has to run before anything is read back below.
+      EventAction::EndOfEventAction(event);
+
+      rl4phys::B5Event b5Event;
+      b5Event.set_event_id(event->GetEventID());
+
+      // One value per arm: chamber 1/2 and hodoscope 1/2.
+      for (G4int iDet = 0; iDet < kDim; ++iDet) {
+        b5Event.add_drift_chamber_hits(NofHits(event, fDriftHCID[iDet]));
+        b5Event.add_hodoscope_time(FirstHodoscopeTime(event, fHodHCID[iDet]));
+      }
+
+      // One value per calorimeter cell: kNofEmCells then kNofHadCells.
+      for (auto edep : GetEmCalEdep()) {
+        b5Event.add_em_cal_edep(static_cast<float>(edep / MeV));
+      }
+
+      for (auto edep : GetHadCalEdep()) {
+        b5Event.add_had_cal_edep(static_cast<float>(edep / MeV));
+      }
+
+      // A failed send is reported once per client, i.e. once per worker thread.
+      fClient.SendB5Event(b5Event);
+
+      // The lines the OpenGL viewer would draw for this event, straight out of
+      // the event's own trajectory container. No filter: everything the viewer
+      // shows is what we want next to it. The count goes to the log because
+      // B5 prints its own per event diagnostics right above it anyway, and it
+      // is the quickest check that storage is really on for this thread.
+      G4cout << "Trajectories sent: " << TrajectoryStream::SendEvent(fClient, event)
+             << G4endl;
+    }
+
+  private:
+    static G4int NofHits(const G4Event* event, G4int collId)
+    {
+      auto hc = GetHC(event, collId);
+      return hc ? static_cast<G4int>(hc->GetSize()) : 0;
+    }
+
+    // A hodoscope collection holds one hit per strip, each already carrying the
+    // earliest time seen in that strip, so the smallest of them is the time of
+    // the first hit in the hodoscope.
+    static float FirstHodoscopeTime(const G4Event* event, G4int collId)
+    {
+      auto hc = GetHC(event, collId);
+      if (!hc || hc->GetSize() == 0) return kNoHodoscopeTime;
+
+      auto first = std::numeric_limits<G4double>::max();
+
+      for (std::size_t i = 0; i < hc->GetSize(); ++i) {
+        auto hit = static_cast<HodoscopeHit*>(hc->GetHit(i));
+        first = std::min(first, hit->GetTime());
+      }
+
+      return static_cast<float>(first / ns);
+    }
+
+    // One client per event action, i.e. one per worker thread.
+    GrpcClient fClient;
+    std::array<G4int, kDim> fHodHCID = {-1, -1};
+    std::array<G4int, kDim> fDriftHCID = {-1, -1};
+};
+
+
+// B5 does not keep one detector for the whole job: /B5/detector/armAngle turns
+// the second arm between runs, three times over run1.mac, so the geometry has
+// to go out once per run rather than once at startup - see
+// GeometryStream::SendForRun, which is also where the master-only guard lives.
+// Same shape as GrpcEventAction above: the example's own action runs first and
+// this one only adds the send.
+class GrpcRunAction : public RunAction
+{
+  public:
+    GrpcRunAction(EventAction* eventAction, std::shared_ptr<grpc::Channel> channel)
+      : RunAction(eventAction), fClient(std::move(channel))
+    {}
+
+    void BeginOfRunAction(const G4Run* run) override
+    {
+      RunAction::BeginOfRunAction(run);
+
+      // Nothing to report on a worker thread, where SendForRun sends nothing.
+      if (auto sent = GeometryStream::SendForRun(fClient)) {
+        G4cout << "Geometry sent over gRPC: " << sent << " bytes" << G4endl;
+      }
+    }
+
+  private:
+    // One client per run action, i.e. one per thread, the same rule the event
+    // action follows.
+    GrpcClient fClient;
+};
+
+
+class RL4PhysActionInitialization : public ActionInitialization
+{
+  public:
+    explicit RL4PhysActionInitialization(std::shared_ptr<grpc::Channel> channel)
+      : fChannel(std::move(channel))
+    {}
+
+    void BuildForMaster() const override
+    {
+      // The body of B5's own BuildForMaster() rather than a call to it: that
+      // one sets B5::RunAction and SetUserAction would only drop it again for
+      // ours. The event action it builds is the master's, which runs no event -
+      // it is there because RunAction's ntuple columns point at its vectors.
+      //
+      // The master is not optional here. It is the only thread that ships the
+      // geometry, so leaving it with the example's plain run action would mean
+      // none is ever sent.
+      SetUserAction(new GrpcRunAction(new EventAction, fChannel));
+    }
+
+    void Build() const override
+    {
+      SetUserAction(new PrimaryGeneratorAction);
+
+      auto eventAction = new GrpcEventAction(fChannel);
+      SetUserAction(eventAction);
+
+      // RunAction books the ntuple columns that point at the vectors owned by
+      // the event action, so it gets the gRPC one.
+      SetUserAction(new GrpcRunAction(eventAction, fChannel));
+
+      // No stepping action: the trajectories go out from the event action, out
+      // of the container Geant4 fills for its own viewer.
+    }
+
+  private:
+    std::shared_ptr<grpc::Channel> fChannel;
+};
+
+
+// --------------------------------------------------------------------
+
+int main(int argc, char** argv)
+{
+
+  if (argc < 2)
+  {
+    G4cerr << "Usage:" << G4endl;
+    G4cerr << "  " << argv[0]
+           << " macro.mac [--threads N] [--grpc-host HOST:PORT]"
+           << G4endl;
+
+    G4cerr << "  " << argv[0]
+           << " --export-gdml geometry.gdml"
+           << G4endl;
+
+    return 1;
+  }
+
+
+
+  // ------------------------------------------------------------
+  // Command line options
+  // ------------------------------------------------------------
+
+  G4String macroFile = "";
+  G4String grpcHost = "localhost:50051";
+  G4String gdmlFile = "";
+
+  G4int nThreads = 1;
+
+
+  for (int i = 1; i < argc; i++)
+  {
+
+    if (std::strcmp(argv[i], "--threads") == 0)
+    {
+
+      if (i + 1 < argc)
+      {
+        nThreads = std::atoi(argv[++i]);
+      }
+      else
+      {
+        G4cerr
+            << "Missing value after --threads"
+            << G4endl;
+
+        return 1;
+      }
+
+    }
+
+    else if (std::strcmp(argv[i], "--grpc-host") == 0 && i + 1 < argc)
+    {
+      grpcHost = argv[++i];
+    }
+
+    else if (std::strcmp(argv[i], "--export-gdml") == 0 && i + 1 < argc)
+    {
+      gdmlFile = argv[++i]; // handled after the kernel is initialized
+    }
+
+    else
+    {
+      macroFile = argv[i];
+    }
+
+  }
+
+
+
+  // ------------------------------------------------------------
+  // Verbose stepping
+  // ------------------------------------------------------------
+
+  G4int precision = 4;
+  G4SteppingVerbose::UseBestUnit(precision);
+
+
+
+  // ------------------------------------------------------------
+  // Run manager
+  // ------------------------------------------------------------
+
+  auto runManager =
+      G4RunManagerFactory::CreateRunManager(
+          G4RunManagerType::MT
+      );
+
+
+  auto mtRunManager =
+      dynamic_cast<G4MTRunManager*>(runManager);
+
+
+
+  if (mtRunManager)
+  {
+
+    mtRunManager->SetNumberOfThreads(
+        nThreads
+    );
+
+
+    G4cout
+        << "Using multithreading with "
+        << nThreads
+        << " threads"
+        << G4endl;
+
+  }
+
+
+
+  auto channel = grpc::CreateChannel(
+      grpcHost, grpc::InsecureChannelCredentials());
+
+  G4cout << "gRPC -> " << grpcHost << G4endl;
+
+
+
+  // ------------------------------------------------------------
+  // User initialization
+  // ------------------------------------------------------------
+
+  runManager->SetUserInitialization(
+      new DetectorConstruction()
+  );
+
+
+  auto physicsList = new FTFP_BERT;
+
+  physicsList->RegisterPhysics(new G4StepLimiterPhysics());
+
+  runManager->SetUserInitialization(
+      physicsList
+  );
+
+
+  runManager->SetUserInitialization(
+      new RL4PhysActionInitialization(channel)
+  );
+
+
+
+  // ------------------------------------------------------------
+  // Initialize kernel
+  // ------------------------------------------------------------
+
+  runManager->Initialize();
+
+
+
+  // ------------------------------------------------------------
+  // GDML export mode
+  //
+  // ./B5_rl4phys --export-gdml geometry.gdml
+  // ------------------------------------------------------------
+
+  if (!gdmlFile.empty())
+  {
+
+    G4bool written =
+        GeometryStream::WriteToFile(
+            gdmlFile
+        );
+
+
+    if (written)
+    {
+      G4cout
+          << "Geometry exported to: "
+          << gdmlFile
+          << G4endl;
+    }
+
+
+    delete runManager;
+
+    return written ? 0 : 1;
+  }
+
+
+
+  // ------------------------------------------------------------
+  // Trajectory storage
+  //
+  // Batch runs keep no trajectories unless asked; the macro below never
+  // asks, because in an interactive run it is the vis system that does.
+  // Applied here on the master, which is also how it reaches the workers.
+  // ------------------------------------------------------------
+
+  TrajectoryStream::Enable();
+
+
+
+  // ------------------------------------------------------------
+  // Batch macro execution
+  //
+  // ./B5_rl4phys run1.mac --threads 8
+  //
+  // ------------------------------------------------------------
+
+
+  if (macroFile.empty())
+  {
+    G4cerr
+        << "No macro file provided"
+        << G4endl;
+
+    delete runManager;
+
+    return 1;
+  }
+
+
+
+  auto ui = G4UImanager::GetUIpointer();
+
+
+  G4int status =
+      ui->ApplyCommand(
+          "/control/execute " + macroFile
+      );
+
+
+
+  if (status != 0)
+  {
+
+    G4cerr
+        << "Error executing macro: "
+        << macroFile
+        << G4endl;
+
+  }
+
+  // ------------------------------------------------------------
+  // Cleanup
+  // ------------------------------------------------------------
+
+  delete runManager;
+  return status;
+}

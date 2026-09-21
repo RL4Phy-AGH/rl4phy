@@ -5,17 +5,16 @@
 #include "FTFP_BERT.hh"
 #include "DetectorConstruction.hh"
 #include "ActionInitialization.hh"
-#include <fstream>
 #include <iostream>
-#include <iterator>
 #include <string>
 
 #ifdef RL4PHY_ENABLE_GDML
-#include "G4GDMLParser.hh"
+#include "GeometryStream.hh"
 #endif
 
 #ifdef RL4PHY_ENABLE_GRPC
 #include "GrpcClient.hh"
+#include "TrajectoryStream.hh"
 #include <grpcpp/grpcpp.h>
 #include <memory>
 #endif
@@ -60,34 +59,24 @@ int main(int argc, char** argv) {
   runManager->Initialize();
 
 #ifdef RL4PHY_ENABLE_GDML
-  if (!exportGdml.empty()) {
-    G4GDMLParser parser;
-    // false keeps the names clean (Station1, ...); otherwise Geant4 tacks a
-    // pointer-hash onto every name, and Python has to read this file.
-    parser.Write(exportGdml, detector->GetWorldPV(), false);
+  // An explicit on-disk copy, only when asked for. The hand-off to the Python
+  // side is not here: it belongs to a run, so RunAction::BeginOfRunAction does
+  // it, once per /run/beamOn.
+  if (!exportGdml.empty() &&
+      GeometryStream::WriteToFile(exportGdml, detector->GetWorldPV())) {
     std::cout << "GDML EXPORTED: " << exportGdml << std::endl;
-
-#ifdef RL4PHY_ENABLE_GRPC
-    // Geometry hand-off (issue #18): ship the freshly exported GDML to the
-    // Python side over the same channel the steps use.
-    if (grpcClient) {
-      std::ifstream gdmlIn(exportGdml, std::ios::binary);
-      std::string gdmlContent((std::istreambuf_iterator<char>(gdmlIn)),
-                              std::istreambuf_iterator<char>());
-      if (gdmlContent.empty()) {
-        std::cerr << "GDML file is empty, nothing sent over gRPC." << std::endl;
-      } else if (grpcClient->SendGeometry(gdmlContent)) {
-        std::cout << "GDML SENT OVER GRPC: " << gdmlContent.size() << " bytes"
-                  << std::endl;
-      }
-    }
-#endif
   }
 #else
   if (!gdmlFile.empty() || !exportGdml.empty()) {
     std::cerr << "GDML support is not available in this build."
               << " Falling back to the in-code geometry." << std::endl;
   }
+#endif
+
+#ifdef RL4PHY_ENABLE_GRPC
+  // Nothing keeps trajectories in a batch run unless it is asked for; the
+  // viewer asks for itself, so this is only needed for the ones we send.
+  if (grpcClient) TrajectoryStream::Enable();
 #endif
 
   auto* uiMgr = G4UImanager::GetUIpointer();

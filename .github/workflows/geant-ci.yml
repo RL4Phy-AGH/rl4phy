@@ -70,7 +70,7 @@ jobs:
           docker run --rm \
             -v "$PWD/g4data:/data" \
             -v "$PWD/out:/out" \
-            rl4phy-geant:ci --export-gdml /out/muone.gdml | tee export.log
+            rl4phy-geant:ci rl4phy-geant --export-gdml /out/muone.gdml | tee export.log
           grep -q 'GDML EXPORTED' export.log
           if grep -qi 'not available' export.log; then
             echo "::error::GDML support is compiled out of the image"; exit 1
@@ -83,7 +83,7 @@ jobs:
         run: |
           set -euo pipefail
           docker run --rm -v "$PWD/g4data:/data" \
-            rl4phy-geant:ci macros/run.mac | tee beam.log
+            rl4phy-geant:ci rl4phy-geant macros/run.mac | tee beam.log
           grep -q '^STEP ' beam.log
 
       - name: Upload outputs
