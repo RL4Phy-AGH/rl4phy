@@ -1,6 +1,7 @@
 import colorsys
 import hashlib
 import os
+import sys
 import threading
 import time
 import zlib
@@ -377,8 +378,8 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             logger.info(f"Received GDML over gRPC: {len(request.gdml)} bytes")
             try:
                 solids = _parse_received_gdml(request.gdml)
-            except Exception as exc:
-                logger.error(f"Could not parse the GDML received over gRPC: {exc!r}")
+            except Exception:
+                logger.exception("Could not parse the GDML received over gRPC")
                 return rl4phy_pb2.Reply()
 
             if not solids:
@@ -431,5 +432,7 @@ def start_server():
 
 
 if __name__ == "__main__":
+    logger.remove()
+    logger.add(sys.stdout)
     rr.init("rl4phy_muone")
     start_server()

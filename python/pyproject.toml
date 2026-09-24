@@ -2,13 +2,13 @@
 name = "rl4phy-python"
 version = "0.1.0"
 description = "gRPC server that turns Geant4 geometry and steps into Rerun recordings"
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "grpcio>=1.62.0",
-    "grpcio-tools>=1.62.0",
+    "grpcio>=1.84.0",
+    "grpcio-tools>=1.84.0",
     "loguru>=0.7.3",
     "numpy>=1.26.0",
-    "protobuf>=4.25.0",
+    "protobuf>=7.36.1",
     "pyg4ometry>=1.4.0",
     "rerun-sdk>=0.26.0",
 ]
@@ -31,4 +31,9 @@ select = [
     "T20",  # flake8-print - no print(), use loguru
     "UP",   # pyupgrade - includes UP031/UP032, f-strings over % and .format
     "B",    # flake8-bugbear
+    "PLC0415",  # no imports inside functions
 ]
+
+# Generated, not committed, so ruff cannot always find them to classify.
+[tool.ruff.lint.isort]
+known-first-party = ["rl4phy_pb2", "rl4phy_pb2_grpc"]

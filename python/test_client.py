@@ -1,8 +1,13 @@
+import sys
+
 import grpc
 from loguru import logger
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
+
+logger.remove()
+logger.add(sys.stdout)
 
 channel = grpc.insecure_channel("localhost:50051")
 stub = rl4phy_pb2_grpc.SendServiceStub(channel)

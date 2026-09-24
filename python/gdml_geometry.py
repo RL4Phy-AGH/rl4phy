@@ -184,9 +184,9 @@ def _tessellate(solid, walk: _Walk) -> tuple[np.ndarray, np.ndarray] | None:
 
     try:
         vertices, polygons, _ = solid.mesh().toVerticesAndPolygons()
-    except Exception as exc:
-        logger.warning(
-            f"Could not tessellate {_clean(solid.name)!r} ({exc!r}), skipping it"
+    except Exception:
+        logger.opt(exception=True).warning(
+            f"Could not tessellate {_clean(solid.name)!r}, skipping it"
         )
         walk.meshes[solid.name] = None
         return None

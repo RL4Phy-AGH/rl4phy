@@ -10,21 +10,20 @@ Docker image installs from it, so keep it committed.
 uv sync                  # create .venv and install locked deps (including dev)
 ```
 
-uv reads `.python-version` (3.11, matching the image) and fetches that
+uv reads `.python-version` (3.12, matching the image) and fetches that
 interpreter if it is missing. Nothing needs activating - prefix commands with
 `uv run`.
 
 `rl4phy_pb2.py` and `rl4phy_pb2_grpc.py` are generated from
-`proto/rl4phy.proto` but committed, so a checkout runs without a build step and
-ruff sorts their imports the same way here and in CI. Regenerate and commit them
-whenever the proto changes:
+`proto/rl4phy.proto` and not committed; the Docker image builds its own.
+Generate them after `uv sync` and again whenever the proto changes:
 
 ```sh
 uv run python -m grpc_tools.protoc -I../proto \
     --python_out=. --grpc_python_out=. ../proto/rl4phy.proto
 ```
 
-They are excluded from ruff in `pyproject.toml`; never edit them by hand.
+Never edit them by hand.
 
 ```sh
 uv run server.py         # run the server
@@ -49,8 +48,8 @@ uv run ruff check --fix .
 ```
 
 Run both before opening a PR. The lint rules encode the style guide below:
-`T20` rejects `print`, `I`/`E402` keep imports at the top and sorted, `UP031`/
-`UP032` reject `%` and `.format` in favour of f-strings.
+`T20` rejects `print`, `I`/`E402`/`PLC0415` keep imports at the top and sorted,
+`UP031`/`UP032` reject `%` and `.format` in favour of f-strings.
 
 ## Style guide
 
@@ -69,6 +68,9 @@ logger.info("server started")
 ```
 
 Pick a level that matches the message: `debug`, `info`, `warning`, `error`.
+
+Entry points (`server.py`, `test_client.py`) send the log to stdout; loguru's
+default would be stderr.
 
 ### Imports at the top
 
@@ -99,12 +101,6 @@ def load(): ...
 
 # good
 f"run {i} of {n}"
-```
-
-Exception: loguru supports lazy formatting, so prefer braces with arguments in log calls.
-
-```python
-logger.info("run {} of {}", i, n)
 ```
 
 ### Almost no comments

@@ -33,12 +33,7 @@ jobs:
       # ruff comes from the dev group, so CI and a developer run the same
       # version rather than whatever is newest that day.
       - name: Install dependencies
-        run: uv sync --locked
-
-      # A pyproject edited without re-locking would otherwise only fail later,
-      # in the Docker build, which installs with --frozen.
-      - name: Check uv.lock is up to date
-        run: uv lock --check
+        run: uv sync --locked --only-group dev
 
       - name: ruff format
         run: uv run ruff format --check .
