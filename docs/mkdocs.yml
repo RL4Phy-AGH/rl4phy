@@ -1,0 +1,8 @@
+site_name: RL4Phy
+docs_dir: src
+site_dir: ../site
+theme:
+  name: material
+
+nav:
+  - Home: index.md

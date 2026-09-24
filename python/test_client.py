@@ -13,7 +13,6 @@ channel = grpc.insecure_channel("localhost:50051")
 stub = rl4phy_pb2_grpc.SendServiceStub(channel)
 
 b1 = rl4phy_pb2.Data(event_scoring=rl4phy_pb2.EventScoring(edep=0.042, event_id=7))
-stub.SendData(b1)
 
 muon = rl4phy_pb2.Data(
     step_hit=rl4phy_pb2.StepHit(
@@ -30,7 +29,6 @@ muon = rl4phy_pb2.Data(
         pdg=13,
     )
 )
-stub.SendData(muon)
 
 # Every calorimeter cell is sent, empty ones included: 80 EM, 20 hadronic.
 em_cal_edep = [0.0] * 80
@@ -47,5 +45,5 @@ b5 = rl4phy_pb2.Data(
         had_cal_edep=had_cal_edep,
     )
 )
-stub.SendData(b5)
+stub.SendDataStream(iter([b1, muon, b5]))
 logger.info("Sent B1 + MUonE + B5 test messages")

@@ -181,26 +181,29 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         # The buffers are reached from the gRPC worker and the idle flusher.
         self._lock = threading.Lock()
 
-    def SendData(self, request, context):
+    def _handle_data(self, request) -> None:
+        self.msg += 1
+        kind = request.WhichOneof("payload")
+
+        if kind == "event_scoring":
+            s = request.event_scoring
+            logger.info(
+                f"[{self.msg}] B1 event_scoring: event={s.event_id} "
+                f"edep = {s.edep:.6f} MeV"
+            )
+        elif kind == "step_hit":
+            self._log_step_hit(request.step_hit)
+        elif kind == "b5_event":
+            self._log_b5_event(request.b5_event)
+        elif kind == "event_trajectories":
+            self._log_event_trajectories(request.event_trajectories)
+        else:
+            logger.warning(f"[{self.msg}] unknown payload")
+
+    def SendDataStream(self, request_iterator, context):
         with self._lock:
-            self.msg += 1
-            kind = request.WhichOneof("payload")
-
-            if kind == "event_scoring":
-                s = request.event_scoring
-                logger.info(
-                    f"[{self.msg}] B1 event_scoring: event={s.event_id} "
-                    f"edep = {s.edep:.6f} MeV"
-                )
-            elif kind == "step_hit":
-                self._log_step_hit(request.step_hit)
-            elif kind == "b5_event":
-                self._log_b5_event(request.b5_event)
-            elif kind == "event_trajectories":
-                self._log_event_trajectories(request.event_trajectories)
-            else:
-                logger.warning(f"[{self.msg}] unknown payload")
-
+            for request in request_iterator:
+                self._handle_data(request)
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:
@@ -415,7 +418,7 @@ def start_server():
     # sends no geometry still gets its tracks drawn the right way up.
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
 
-    # max_workers=1: SendData does all its work holding the lock the flusher also
+    # max_workers=1: SendDataStream does all its work holding the lock the flusher also
     # takes, so a second worker would only queue up behind it.
     servicer = AgentServer()
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))

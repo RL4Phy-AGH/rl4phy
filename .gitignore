@@ -4,3 +4,4 @@ __pycache__/
 python/rl4phy_pb2*.py
 .venv/
 .ruff_cache/
+site/
