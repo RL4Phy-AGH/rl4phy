@@ -1,12 +1,12 @@
 #----------------------------------------------------------------------------
-# RL4PhyExample - one function to turn a vendored Geant4 example into an
+# RL4PhyExample - one function to turn a copied Geant4 example into an
 # RL4PHYS application:
 #
 #   rl4phy_add_example(<Name>)
 #
 # expects, next to the calling CMakeLists.txt:
 #
-#   <Name>/           the untouched upstream example (src/, include/, macros)
+#   <Name>/           the example as Geant4 ships it, untouched (src/, include/, macros)
 #   <Name>_rl4phys.cc our entry point, built against <Name>/include and
 #                     geant4/commons
 #
@@ -40,7 +40,7 @@ function(rl4phy_add_example _name)
     message(FATAL_ERROR "rl4phy_add_example(${_name}): missing entry point ${_main}")
   endif()
   if(NOT IS_DIRECTORY ${_dir}/src)
-    message(FATAL_ERROR "rl4phy_add_example(${_name}): missing upstream example directory ${_dir}")
+    message(FATAL_ERROR "rl4phy_add_example(${_name}): missing example directory ${_dir}")
   endif()
 
   file(GLOB _sources CONFIGURE_DEPENDS ${_dir}/src/*.cc)
@@ -54,7 +54,7 @@ function(rl4phy_add_example _name)
   rl4phy_enable_grpc(${_name}_rl4phys)
 
   # The example's own macros and reference output, copied to <build>/<name>/ the
-  # way the upstream CMakeLists does it - the executables read them from the
+  # way the example's own CMakeLists does it - the executables read them from the
   # current working directory. Globbed rather than listed so a new example costs
   # no extra bookkeeping.
   file(GLOB _scripts CONFIGURE_DEPENDS
