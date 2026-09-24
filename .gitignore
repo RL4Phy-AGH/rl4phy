@@ -2,6 +2,8 @@ cpp_generated/
 geant4/build/
 python/rl4phy_pb2.py
 python/rl4phy_pb2_grpc.py
-python/__pycache__/
+__pycache__/
+python/.pytest_cache/
+datasets/
 .venv/
 site/

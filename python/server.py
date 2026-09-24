@@ -16,6 +16,7 @@ import rerun as rr
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
+from dataset_writer import maybe_create_step_writer
 from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid, parse_gdml
 
 RERUN_GRPC_PORT = 9876
@@ -267,6 +268,8 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         # The buffers are reached from the gRPC worker and from the idle flusher
         # thread, so everything that touches them goes through this.
         self._lock = threading.Lock()
+        # None unless RL4PHY_DATASET_DIR is set; see dataset_writer.py.
+        self._dataset = maybe_create_step_writer()
 
     def _handle_data(self, request) -> None:
         self.msg += 1
@@ -294,6 +297,15 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:
+        # Recording is a side job: a broken sink must not take the gRPC path or
+        # the rerun logging down with it.
+        if self._dataset is not None:
+            try:
+                self._dataset.append_step_hit(hit)
+            except Exception as exc:
+                print(f"Dataset: disabling sink after {exc!r}")
+                self._dataset = None
+
         # A step hit carrying a new event id is the only end of event MUonE ever
         # announces, so it is what closes the one before it. B5 says so outright
         # and its worker threads interleave events as soon as --threads is raised

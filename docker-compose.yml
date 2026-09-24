@@ -27,7 +27,14 @@ services:
       - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
     # No shared volume between the two services: geometry arrives over gRPC at
     # the start of every run, straight from tmpfs on the Geant4 side, so neither
-    # end has a file to hand over.
+    # end has a file to hand over. The one bind mount below is the opt-in
+    # dataset sink; with RL4PHY_DATASET_DIR unset nothing is written to it.
+    environment:
+      # Recording is opt-in and off by default. Set RL4PHY_DATASET_DIR=/datasets
+      # on the host to write the parquet files into ./datasets there.
+      RL4PHY_DATASET_DIR: ${RL4PHY_DATASET_DIR:-}
+    volumes:
+      - ./datasets:/datasets
 
   geant:
     build:

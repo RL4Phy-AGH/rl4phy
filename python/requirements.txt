@@ -2,5 +2,6 @@ grpcio>=1.62.0
 grpcio-tools>=1.62.0
 numpy>=1.26.0
 protobuf>=4.25.0
+pyarrow>=16.0.0
 pyg4ometry>=1.4.0
 rerun-sdk>=0.26.0
