@@ -33,15 +33,17 @@ RUN cmake -S /app/geant4/G4Examples -B /app/geant4/G4Examples/build \
     -DCMAKE_BUILD_TYPE=Release \
     -DWITH_GEANT4_UIVIS=OFF && \
     cmake --build /app/geant4/G4Examples/build --config Release --parallel $(nproc) && \
-    install -m 0755 /app/geant4/G4Examples/build/B1_rl4phys /usr/local/bin/B1_rl4phys && \
-    install -m 0755 /app/geant4/G4Examples/build/B5_rl4phys /usr/local/bin/B5_rl4phys
+    install -m 0755 /app/geant4/G4Examples/build/B1_rl4phy /usr/local/bin/B1_rl4phy && \
+    install -m 0755 /app/geant4/G4Examples/build/B5_rl4phy /usr/local/bin/B5_rl4phy && \
+    install -m 0755 /app/geant4/G4Examples/build/Hadr01_rl4phy /usr/local/bin/Hadr01_rl4phy
 
 COPY geant4/MUonE/macros /work/macros
 COPY geant4/G4Examples/B1/run1.mac geant4/G4Examples/B1/run2.mac /work/B1/
 COPY geant4/G4Examples/B5/run1.mac geant4/G4Examples/B5/run2.mac /work/B5/
+COPY geant4/G4Examples/Hadr01/hadr01.in /work/Hadr01/
 WORKDIR /work
 VOLUME ["/data"]
-# No ENTRYPOINT on purpose: the image ships three binaries (rl4phy-geant,
-# B1_rl4phys, B5_rl4phys), so the binary is simply the first argument. Run with
+# No ENTRYPOINT on purpose: the image ships four binaries (rl4phy-geant,
+# B1_rl4phy, B5_rl4phy, Hadr01_rl4phy), so the binary is simply the first argument. Run with
 # no arguments, it starts the MUonE application against the compose receiver.
 CMD ["rl4phy-geant", "--grpc-host", "python:50051", "macros/run.mac"]

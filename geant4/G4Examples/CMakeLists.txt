@@ -22,7 +22,7 @@ endif()
 include(${Geant4_USE_FILE})
 
 #----------------------------------------------------------------------------
-# RL4PHYS helpers: shared gRPC plumbing and rl4phy_add_example(). The path is
+# RL4Phy helpers: shared gRPC plumbing and rl4phy_add_example(). The path is
 # relative to this file, so it resolves whether this directory is configured
 # directly or pulled in by ../CMakeLists.txt.
 #
@@ -32,7 +32,8 @@ include(RL4PhyExample)
 
 #----------------------------------------------------------------------------
 # One line per example: <Name>/ is the untouched upstream example and
-# <Name>_rl4phys.cc our entry point. See README.md.
+# <Name>_rl4phy.cc our entry point. See README.md.
 #
 rl4phy_add_example(B1)
 rl4phy_add_example(B5)
+rl4phy_add_example(Hadr01)
