@@ -16,6 +16,7 @@ from loguru import logger
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
+from dataset_writer import maybe_create_step_writer
 from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid, parse_gdml
 
 RERUN_GRPC_PORT = 9876
@@ -180,6 +181,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         self._msg_at_last_check = 0
         # The buffers are reached from the gRPC worker and the idle flusher.
         self._lock = threading.Lock()
+        self._dataset = maybe_create_step_writer()
 
     def _handle_data(self, request) -> None:
         self.msg += 1
@@ -207,6 +209,13 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         return rl4phy_pb2.Reply()
 
     def _log_step_hit(self, hit) -> None:
+        if self._dataset is not None:
+            try:
+                self._dataset.append_step_hit(hit)
+            except Exception as exc:
+                logger.warning(f"Dataset: disabling sink after {exc!r}")
+                self._dataset = None
+
         # A new event id is the only end of event MUonE announces. B5 says so
         # outright and interleaves events across threads, which would make this
         # fire on nearly every step, so it stands down once a marker is seen.
