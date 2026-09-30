@@ -43,12 +43,7 @@ def _hit(event_id, track_id, x, y, z, e_kin=1000.0, pdg=13, parent_id=0):
 
 
 def _record(directory: str, hits: list[_FakeHit]) -> str:
-    """Write the hits through the real sink, in two-row batches.
-
-    Going through ParquetStepWriter rather than building the table by hand keeps
-    the tests honest about the file the server actually produces, and the small
-    flush size means every fixture crosses a flush boundary.
-    """
+    """Write the hits through the real sink, in two-row batches."""
     writer = ParquetStepWriter(directory, flush_rows=2)
     for hit in hits:
         writer.append_step_hit(hit)
@@ -57,11 +52,7 @@ def _record(directory: str, hits: list[_FakeHit]) -> str:
 
 
 def write_dataset(directory: str) -> str:
-    """Two usable tracks plus a single-hit track that must be dropped.
-
-    The rows are recorded interleaved on purpose: the reader has to rebuild the
-    trajectories from (event_id, track_id) and row_index, not from row order.
-    """
+    """Two usable tracks plus a single-hit track that must be dropped, interleaved."""
     return _record(
         directory,
         [
@@ -76,11 +67,7 @@ def write_dataset(directory: str) -> str:
 
 
 def write_long_dataset(directory: str) -> str:
-    """Three straight tracks of four hits each, starting far apart.
-
-    gymnasium's env_checker steps once per reset and rejects an environment that
-    truncates after a single step, so nothing here may be a two-hit track.
-    """
+    """Three straight tracks of four hits each; env_checker needs more than two hits."""
     hits = []
     for track_id, x in enumerate((0.0, 100.0, 200.0), start=1):
         hits += [_hit(0, track_id, x, 0.0, 10.0 * step) for step in range(4)]
@@ -91,11 +78,8 @@ def test_recorded_file_name_and_row_index(tmp_path):
     path = write_dataset(str(tmp_path))
     table = pq.read_table(path)
 
-    # One file per server run, and two servers started in the same second do not
-    # collide.
     assert os.path.basename(path).endswith(f"-{os.getpid()}.parquet")
 
-    # The row counter keeps counting across flushes and does not overflow.
     assert table.num_rows == 6
     assert table.schema.field("row_index").type == pa.int64()
     assert table.column("row_index").to_pylist() == [0, 1, 2, 3, 4, 5]
@@ -126,7 +110,6 @@ def test_spaces(tmp_path):
     assert env.action_space.dtype == np.float32
     assert env.action_space.contains(env.action_space.sample())
 
-    # Both boxes are bounded by the data, not by infinity.
     assert np.isfinite(env.observation_space.low).all()
     assert np.isfinite(env.observation_space.high).all()
     # x runs from 0 to 5 mm and e_kin is 1000 MeV everywhere, plus the margin.
@@ -153,8 +136,6 @@ def test_reward_and_termination(tmp_path):
     assert not terminated and not truncated
     np.testing.assert_allclose(observation[:3], [3.0, 4.0, 0.0])
 
-    # A perfect prediction of the last hit scores zero and exhausts the
-    # recording, which is a truncation and never a termination.
     _, reward, terminated, truncated, _ = env.step([3.0, 4.0, 10.0])
     assert reward == 0.0
     assert truncated and not terminated
@@ -162,7 +143,6 @@ def test_reward_and_termination(tmp_path):
     with pytest.raises(RuntimeError):
         env.step([0.0, 0.0, 0.0])
 
-    # An episode has one step less than it has hits.
     assert env.episode_length(0) == 2
     assert env.episode_length(1) == 1
 
@@ -188,10 +168,8 @@ def test_epochs_cover_every_track(tmp_path):
         return [env.reset(seed=7 if i == 0 else None)[1]["episode"] for i in range(6)]
 
     seen = shuffled_run()
-    # Sampling must not starve a track: every epoch is a permutation.
     assert sorted(seen[:3]) == [0, 1, 2]
     assert sorted(seen[3:]) == [0, 1, 2]
-    # Seeding once at the start of a run reproduces the whole sequence.
     assert shuffled_run() == seen
 
 

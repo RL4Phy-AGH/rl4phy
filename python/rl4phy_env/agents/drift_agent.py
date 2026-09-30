@@ -1,11 +1,4 @@
-"""Persistence plus a constant step along the beam axis.
-
-The cheapest agent that knows the beam goes down z. It has one parameter, the
-mean z displacement between two consecutive hits, and ``fit`` estimates it from
-recorded tracks. The benchmark fits it on the very tracks it then scores, so
-its number is optimistic by construction: a lower bound for a constant-step
-model, not a held-out result.
-"""
+"""Persistence plus a constant step along z, fitted on the scored tracks."""
 
 from __future__ import annotations
 
