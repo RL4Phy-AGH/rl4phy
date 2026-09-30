@@ -1,8 +1,23 @@
 # Connecting Geant4 examples to RL4PHYS (gRPC)
 
-How to add a Geant4 example so that it runs exactly as upstream wrote it and
+How to add a Geant4 example so that it runs exactly as Geant4 ships it and
 streams its results over gRPC to the Python receiver, which visualises them in Rerun.
 **B1** and **B5** at the end are this guide applied.
+
+## What is Geant4's and what is ours
+
+| Path | Origin | Changed? |
+|------|--------|----------|
+| `B1/` | copy of `examples/basic/B1` from Geant4 **v11.2.2** ([this commit](https://gitlab.cern.ch/geant4/geant4/-/tree/f840b5da3a70c2c7be836fdb72a781eab12e0af6/examples/basic/B1)) | no, byte for byte |
+| `B5/` | copy of `examples/basic/B5` from Geant4 **v11.3.2** ([this commit](https://gitlab.cern.ch/geant4/geant4/-/tree/62f62ecae238a7c304c52af4affbe70795475590/examples/basic/B5)) | no, byte for byte |
+| `B1_rl4phys.cc`, `B5_rl4phys.cc` | written here | ours |
+| `CMakeLists.txt`, `../cmake/`, `../commons/` | written here | ours |
+| `img/` | screenshots for this guide | ours |
+
+The links point at the exact Geant4 commit the copy was taken from, so
+`diff -r` against that tree must come back empty. The Docker image builds
+everything against Geant4 11.3.2 (`Dockerfile.base`); the 11.2.2 copy of B1
+compiles against it unchanged.
 
 ## What an integration consists of
 
@@ -16,7 +31,7 @@ Three rules always hold:
 
 - Geant4 runs **exactly like the original example** — same physics, same scoring,
   same console output.
-- The vendored example directory stays **byte-for-byte upstream**.
+- The example directory `<Name>/` stays **byte for byte what Geant4 ships**.
 - Everything we add lives in one file beside it, `<Name>_rl4phys.cc`.
 
 ## Rule one: subclass, never edit
@@ -24,7 +39,7 @@ Three rules always hold:
 The integration subclasses the example's user actions in `<Name>_rl4phys.cc` and
 never touches `<Name>/`. Two reasons:
 
-- the copy in the repo can be diffed against the upstream release at any time;
+- the copy in the repo can be diffed against the Geant4 release at any time;
 - if a new Geant4 version changes the example, we overwrite `<Name>/` with the
   new copy and adjust only our side: `<Name>_rl4phys.cc`, and the proto if the
   example's output changed. Anything that broke shows up there as a compile
@@ -205,7 +220,7 @@ call in it exists under that name today. Lines marked `// optional` can be
 deleted without touching anything else.
 
 ```cpp
-// Name_rl4phys.cc - RL4PHYS entry point for the vendored Name example.
+// Name_rl4phys.cc - RL4PHYS entry point for the Name example copied from Geant4.
 // The example itself (Name/src, Name/include) is not touched.
 
 #include "ActionInitialization.hh"
@@ -517,7 +532,8 @@ The example still prints its own output; check against it.
 
 ## B1
 
-Official B1: [Geant4 basic/B1](https://gitlab.cern.ch/geant4/geant4/-/tree/master/examples/basic/B1).
+Official B1: [Geant4 basic/B1 at v11.2.2](https://gitlab.cern.ch/geant4/geant4/-/tree/f840b5da3a70c2c7be836fdb72a781eab12e0af6/examples/basic/B1).
+The copy in `B1/` is the unmodified 11.2.2 example.
 
 ### What B1 scores
 
@@ -564,7 +580,7 @@ Check that Geant4’s cumulative dose and the gRPC edep values are consistent.
 
 | File | Role |
 |------|------|
-| `B1/` | original Geant4 example |
+| `B1/` | original Geant4 example (v11.2.2), unmodified |
 | `B1_rl4phys.cc` | gRPC integration |
 | `CMakeLists.txt` | builds `B1_rl4phys`, generates code from proto |
 | `proto/rl4phy.proto` | shared gRPC contract |
@@ -574,7 +590,7 @@ Check that Geant4’s cumulative dose and the gRPC edep values are consistent.
 
 ## B5
 
-Official B5: [Geant4 basic/B5](https://gitlab.cern.ch/geant4/geant4/-/tree/master/examples/basic/B5).
+Official B5: [Geant4 basic/B5 at v11.3.2](https://gitlab.cern.ch/geant4/geant4/-/tree/62f62ecae238a7c304c52af4affbe70795475590/examples/basic/B5).
 The copy in `B5/` is the unmodified 11.3.2 example.
 
 B5 is the guide applied end to end: a payload of its own, the geometry and the
@@ -699,10 +715,10 @@ mid-macro: `run1.mac` prints `Geometry sent over gRPC: N bytes` four times, once
 
 | File | Role |
 |------|------|
-| `B5/` | original Geant4 example, unmodified |
+| `B5/` | original Geant4 example (v11.3.2), unmodified |
 | `B5_rl4phys.cc` | gRPC integration |
 | `CMakeLists.txt` | one line: `rl4phy_add_example(B5)` |
-| `geant4/cmake/RL4PhyExample.cmake` | builds any vendored example as `<Name>_rl4phys` |
+| `geant4/cmake/RL4PhyExample.cmake` | builds any copied example as `<Name>_rl4phys` |
 | `geant4/cmake/RL4PhyGrpc.cmake` | gRPC discovery and the shared `rl4phy_proto` stubs |
 | `Dockerfile` | installs `B5_rl4phys`, ships `B5/run1.mac`, `B5/run2.mac` |
 

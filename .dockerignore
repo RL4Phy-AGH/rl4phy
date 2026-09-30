@@ -7,3 +7,7 @@ geant4/**/build/
 
 # the repo history does not belong in the image context either
 .git/
+
+# a host virtualenv would land on top of the one uv sync builds in the image
+**/.venv/
+**/.ruff_cache/
