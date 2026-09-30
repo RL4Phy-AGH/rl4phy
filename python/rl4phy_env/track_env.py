@@ -1,12 +1,7 @@
 """Replay environment over recorded Geant4 step hits.
 
-An episode is one particle track. The agent sees the current hit and predicts
-where the particle will be at the next hit; the reward is minus the distance to
-the true position. The data comes from parquet files written by
-``python/dataset_writer.py``.
-
-Units follow the wire format of the StepHit message: positions in mm, momenta in
-MeV/c, kinetic energy in MeV.
+An episode is one track: the agent sees the current hit and predicts the next
+one; the reward is minus the distance in mm. Units as on the wire: mm, MeV/c, MeV.
 """
 
 from __future__ import annotations
@@ -25,11 +20,7 @@ POSITION_INDICES = tuple(OBSERVATION_COLUMNS.index(name) for name in ("x", "y", 
 ORDER_COLUMN = "row_index"
 MIN_HITS_PER_EPISODE = 2
 
-# Both boxes are the bounding box of the loaded data, padded by this margin in
-# each column's own unit (mm, MeV/c, MeV). They are loose bounds on what the
-# recording contains, not a physical claim. The action box is the one that
-# matters: random actions are drawn from it, so an unbounded box would make the
-# random baseline meaningless.
+# Both spaces are the bounding box of the data plus this margin, per column unit.
 BOX_MARGIN = 50.0
 
 
@@ -67,11 +58,10 @@ def resolve_dataset_files(dataset: str | os.PathLike) -> list[str]:
 
 
 def load_tracks(dataset: str | os.PathLike) -> list[Track]:
-    """Read the dataset and split it into per-track trajectories.
+    """Split the dataset into per-track trajectories.
 
-    Tracks shorter than ``MIN_HITS_PER_EPISODE`` cannot produce a prediction and
-    are dropped. Track and event ids restart with every server run, so the file a
-    row came from is part of the grouping key.
+    Tracks shorter than ``MIN_HITS_PER_EPISODE`` are dropped. Ids restart with
+    every server run, so the source file is part of the grouping key.
     """
     files = resolve_dataset_files(dataset)
     if not files:
@@ -108,7 +98,7 @@ def load_tracks(dataset: str | os.PathLike) -> list[Track]:
     ends = np.concatenate((boundaries, [len(run)]))
 
     tracks: list[Track] = []
-    for start, end in zip(starts, ends):
+    for start, end in zip(starts, ends, strict=True):
         if end - start < MIN_HITS_PER_EPISODE:
             continue
         tracks.append(
@@ -133,18 +123,10 @@ class TrackPredictionEnv(gym.Env):
     terminated:  never, see truncated
     truncated:   the recording of the track is exhausted
 
-    Running out of recorded hits is not a terminal state of the process being
-    modelled -- the particle carries on, only the recording stops -- so the
-    episode ends truncated. A bootstrapping learner needs that distinction: on
-    ``terminated`` it sets the value of the final state to zero, which for a
-    track that merely left the last tracker would be wrong.
-
-    Episodes are served in epochs: one pass visits every track exactly once, in
-    dataset order, or in an order drawn from the environment's RNG with
-    ``shuffle=True``. ``reset(seed=...)`` starts a fresh epoch, so a seeded run
-    is reproducible. ``reset(options={"episode": i})`` selects a specific track,
-    which is what the evaluation script uses to score policies on the same
-    episodes.
+    The recording ending is not a terminal state of the particle, hence
+    truncated. Episodes are served in epochs (every track once, shuffled with
+    ``shuffle=True``); ``reset(seed=...)`` starts a fresh epoch and
+    ``reset(options={"episode": i})`` picks a track.
     """
 
     metadata = {"render_modes": []}
@@ -189,8 +171,7 @@ class TrackPredictionEnv(gym.Env):
     def reset(self, *, seed: int | None = None, options: dict | None = None):
         super().reset(seed=seed)
         if seed is not None:
-            # Without this, which episode a seeded reset serves would depend on
-            # how many resets happened before it.
+            # A seeded reset must not depend on how many resets came before it.
             self._epoch = None
             self._cursor = 0
 

@@ -1,28 +1,15 @@
-"""First benchmark on recorded MUonE data: the agents from ``rl4phy_env.agents``.
+"""Score the baseline agents on recorded tracks; errors split into (x, y) and z.
 
-    random       uniform sample from the action space
-    persistence  predict that the particle does not move between two hits
-    drift        persistence plus a constant step along z
-
-None of them learns anything; their errors in mm are the bar every later model
-has to clear. The errors are reported split into a transverse (x, y) and a
-longitudinal (z) part, because on this geometry the two are not the same
-problem: the step along z is close to the station spacing, while the transverse
-motion is the scattering that a surrogate would actually have to learn.
-
-drift is fitted on the very tracks it is then scored on, see its module for why
-that makes its number a lower bound rather than a held-out result.
-
-Run from the ``python/`` directory:
-
-    python -m rl4phy_env.benchmark --dataset /path/to/steps-*.parquet
+Run from ``python/``: ``python -m rl4phy_env.benchmark --dataset ../datasets``
 """
 
 from __future__ import annotations
 
 import argparse
+import sys
 
 import numpy as np
+from loguru import logger
 
 from rl4phy_env.agents.drift_agent import DriftAgent
 from rl4phy_env.agents.persistence_agent import PersistenceAgent
@@ -43,8 +30,6 @@ def evaluate(env: TrackPredictionEnv, agent, episodes: list[int], seed: int) -> 
             observation, reward, terminated, truncated, info = env.step(prediction)
             total += reward
 
-            # step() returns the hit it just asked about, so the truth the
-            # prediction was scored against is that hit's position.
             error = prediction - positions_of(observation)
             assert abs(np.linalg.norm(error) - info["distance_mm"]) <= 1e-4 * max(
                 1.0, info["distance_mm"]
@@ -55,7 +40,6 @@ def evaluate(env: TrackPredictionEnv, agent, episodes: list[int], seed: int) -> 
                 break
         episode_rewards.append(total)
 
-    # Columns of an error vector, in the order positions_of returns them.
     stacked = np.asarray(errors, dtype=np.float64)
     distances = np.linalg.norm(stacked, axis=1)
     transverse = np.linalg.norm(stacked[:, :2], axis=1)
@@ -101,35 +85,35 @@ def main() -> None:
         DriftAgent.fit(env, episodes),
     )
 
-    print(f"dataset: {args.dataset}")
-    print(f"tracks with >= 2 hits: {env.num_episodes}, evaluating {count}")
-    print(
+    logger.info(f"dataset: {args.dataset}")
+    logger.info(f"tracks with >= 2 hits: {env.num_episodes}, evaluating {count}")
+    logger.info(
         f"hits per evaluated track: min {min(hits)}, max {max(hits)}, total {sum(hits)}"
     )
-    print(
+    logger.info(
         "action space (mm): "
         f"low {np.round(env.action_space.low, 1).tolist()} "
         f"high {np.round(env.action_space.high, 1).tolist()}"
     )
     drift = agents[-1]
-    print(
+    logger.info(
         f"drift step (mm): {np.round(drift.step_mm, 3).tolist()}, "
         "fitted on the evaluated tracks"
     )
-    print()
+    logger.info("")
 
     header = (
         f"{'agent':<12}{'episodes':>9}{'steps':>7}{'mean ep. reward':>18}"
         f"{'mean err':>10}{'median err':>12}{'mean err x,y':>14}{'mean err z':>12}"
     )
-    print(header)
-    print(
+    logger.info(header)
+    logger.info(
         f"{'':<12}{'':>9}{'':>7}{'':>18}{'[mm]':>10}{'[mm]':>12}{'[mm]':>14}{'[mm]':>12}"
     )
-    print("-" * len(header))
+    logger.info("-" * len(header))
     for agent in agents:
         result = evaluate(env, agent, episodes, args.seed)
-        print(
+        logger.info(
             f"{agent.name:<12}{result['episodes']:>9}{result['steps']:>7}"
             f"{result['mean_episode_reward']:>18.3f}"
             f"{result['mean_step_distance_mm']:>10.3f}"
@@ -140,4 +124,6 @@ def main() -> None:
 
 
 if __name__ == "__main__":
+    logger.remove()
+    logger.add(sys.stdout, format="{message}")
     main()
