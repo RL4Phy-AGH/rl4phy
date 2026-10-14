@@ -6,15 +6,17 @@ requires-python = ">=3.12"
 dependencies = [
     "grpcio>=1.84.0",
     "grpcio-tools>=1.84.0",
+    "gymnasium>=0.29.0",
     "loguru>=0.7.3",
     "numpy>=1.26.0",
     "protobuf>=7.36.1",
+    "pyarrow>=16.0.0",
     "pyg4ometry>=1.4.0",
     "rerun-sdk>=0.26.0",
 ]
 
 [dependency-groups]
-dev = ["ruff>=0.14.0"]
+dev = ["pytest>=8.0.0", "ruff>=0.14.0"]
 
 [tool.uv]
 package = false
