@@ -6,6 +6,7 @@ import pytest
 
 from dataset_reader import energy_loss, mass, read_crossings, theta, theta_xy
 from dataset_writer import ParquetStepWriter
+from parquet_to_csv import main as parquet_to_csv
 from test_client import MASS_MU, STATION_10MM, fake_crossings
 
 # Median of the standard Moyal distribution the generator draws from.
@@ -46,3 +47,10 @@ def test_derived_quantities_match_the_generator(recorded):
     assert abs(np.std(theta_y) / layer.theta0_rad - 1.0) < 0.1
 
     assert np.allclose(mass(table), MASS_MU, atol=1e-3)
+
+
+def test_csv_round_trip(recorded):
+    [name] = [p for p in os.listdir(recorded) if p.endswith(".parquet")]
+    parquet_to_csv([str(recorded / name)])
+    from_csv = read_crossings(str(recorded / name).removesuffix("parquet") + "csv")
+    assert from_csv.equals(read_crossings(str(recorded / name)))

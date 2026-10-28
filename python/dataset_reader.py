@@ -4,6 +4,7 @@ import sys
 
 import numpy as np
 import pyarrow as pa
+import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 from loguru import logger
 
@@ -17,9 +18,14 @@ def read_crossings(source: str) -> pa.Table:
         paths = glob.glob(source)
     if not paths:
         raise FileNotFoundError(f"no crossings found at {source}")
-    return pa.concat_tables(
-        [pq.read_table(path, schema=STEP_SCHEMA) for path in sorted(paths)]
-    )
+    return pa.concat_tables([_read(path) for path in sorted(paths)])
+
+
+def _read(path: str) -> pa.Table:
+    if path.endswith(".csv"):
+        options = pa_csv.ConvertOptions(column_types=STEP_SCHEMA)
+        return pa_csv.read_csv(path, convert_options=options)
+    return pq.read_table(path, schema=STEP_SCHEMA)
 
 
 def _momentum(table: pa.Table, point: str) -> np.ndarray:
