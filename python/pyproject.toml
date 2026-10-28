@@ -39,3 +39,7 @@ select = [
 # Generated, not committed, so ruff cannot always find them to classify.
 [tool.ruff.lint.isort]
 known-first-party = ["rl4phy_pb2", "rl4phy_pb2_grpc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "rl4phy_env"]
+pythonpath = ["."]

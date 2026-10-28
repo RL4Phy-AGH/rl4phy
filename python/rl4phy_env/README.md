@@ -61,8 +61,8 @@ observation, reward, terminated, truncated, info = env.step([0.0, 0.0, 0.0])
 
 ## Known limitations
 
-- Only `StepHit` messages are recorded, and since #37 no example sends them
-  until #45 lands.
+- Reads the columns from before #45 (`x..e_kin`, `row_index`), which the
+  writer no longer produces; it is rebuilt as a crossing environment under #33.
 - Steps are only produced inside the `Station` volumes, so a trajectory is a
   sequence of tracker hits, not a continuous path.
 - The reward ignores momentum and energy.

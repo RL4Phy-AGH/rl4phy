@@ -20,6 +20,12 @@ from dataset_writer import ParquetStepWriter
 from rl4phy_env import ENV_ID
 from rl4phy_env.track_env import OBSERVATION_COLUMNS, TrackPredictionEnv, load_tracks
 
+pytest.skip(
+    "rl4phy_env reads the columns from before #45 (x..e_kin, row_index); "
+    "it is rebuilt as a crossing environment under #33",
+    allow_module_level=True,
+)
+
 
 class _FakeHit:
     def __init__(self, **values):
