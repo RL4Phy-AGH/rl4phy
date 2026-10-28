@@ -50,7 +50,8 @@ def test_derived_quantities_match_the_generator(recorded):
 
 
 def test_csv_round_trip(recorded):
-    [name] = [p for p in os.listdir(recorded) if p.endswith(".parquet")]
-    parquet_to_csv([str(recorded / name)])
-    from_csv = read_crossings(str(recorded / name).removesuffix("parquet") + "csv")
-    assert from_csv.equals(read_crossings(str(recorded / name)))
+    parquet_to_csv([str(recorded)])
+    [csv] = [p for p in os.listdir(recorded) if p.endswith(".csv")]
+    [parquet] = [p for p in os.listdir(recorded) if p.endswith(".parquet")]
+    assert (recorded / csv).with_suffix(".parquet") == recorded / parquet
+    assert read_crossings(str(recorded / csv)).equals(read_crossings(str(recorded)))

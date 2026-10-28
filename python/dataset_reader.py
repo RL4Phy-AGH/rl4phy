@@ -11,21 +11,25 @@ from loguru import logger
 from dataset_writer import FILE_PREFIX, STEP_SCHEMA
 
 
-def read_crossings(source: str) -> pa.Table:
+def crossing_files(source: str) -> list[str]:
     if os.path.isdir(source):
         paths = glob.glob(os.path.join(source, f"{FILE_PREFIX}-*.parquet"))
     else:
         paths = glob.glob(source)
     if not paths:
         raise FileNotFoundError(f"no crossings found at {source}")
-    return pa.concat_tables([_read(path) for path in sorted(paths)])
+    return sorted(paths)
 
 
-def _read(path: str) -> pa.Table:
-    if path.endswith(".csv"):
+def read_file(path: str) -> pa.Table:
+    if os.path.splitext(path)[1].lower() == ".csv":
         options = pa_csv.ConvertOptions(column_types=STEP_SCHEMA)
         return pa_csv.read_csv(path, convert_options=options)
     return pq.read_table(path, schema=STEP_SCHEMA)
+
+
+def read_crossings(source: str) -> pa.Table:
+    return pa.concat_tables([read_file(path) for path in crossing_files(source)])
 
 
 def _momentum(table: pa.Table, point: str) -> np.ndarray:

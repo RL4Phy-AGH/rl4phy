@@ -44,7 +44,8 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         for request in request_iterator:
             with self._lock:
                 self._handle_data(request)
-        # The stream is one Geant4 job, and its recording ends with it.
+        # The stream ends with the Geant4 thread that opened it, and so does
+        # its file.
         with self._lock:
             if self._writer is not None:
                 self._writer.close()

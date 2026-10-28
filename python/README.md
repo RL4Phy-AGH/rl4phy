@@ -10,8 +10,8 @@ truth and the Docker image installs from it, so keep it committed.
 | `server.py` | entry point: reads the environment, one handler per payload of `proto/rl4phy.proto` |
 | `rerun_view.py` | everything that talks to Rerun: the connection, geometry, trajectories |
 | `gdml_geometry.py` | turns the GDML sent at the start of a run into drawable solids |
-| `dataset_writer.py` | records `StepHit` crossings, one Parquet file per Geant4 job |
-| `dataset_reader.py` | reads recordings back and derives energy loss, scattering angle and mass |
+| `dataset_writer.py` | records `StepHit` crossings, one Parquet file per gRPC stream |
+| `dataset_reader.py` | reads recordings back, Parquet or CSV, and derives energy loss, scattering angle and mass |
 | `parquet_to_csv.py` | exports a recording to CSV (#38) |
 | `test_client.py` | sends fake data, including generated crossings, to a running server |
 | `tests/` | the pytest suite |
@@ -62,32 +62,40 @@ off.
 | Variable | Meaning |
 |---|---|
 | `RL4PHY_DATASET_DIR` | directory for the Parquet recordings; unset means nothing is recorded |
-| `RL4PHY_RERUN_URL` | where the Rerun viewer listens; compose points it at the `rerun` service |
+| `RL4PHY_RERUN_URL` | where the Rerun viewer listens (default `rerun+http://127.0.0.1:9876/proxy`); compose points it at the `rerun` service |
 | `RL4PHY_MAX_LABELS` | draw labels when an event or a geometry group has at most this many items (default 0) |
 
 ## Recording crossings
 
-With `RL4PHY_DATASET_DIR` set the server writes one file per Geant4 job (one
-per gRPC stream) as `crossings-<time>-<pid>-<n>.parquet`. The file is written
-under a `.partial` name and renamed when the job ends, so an unfinished one is
-never read by mistake. Each row is one `StepHit`: the ids, the volume name, the
-four-momentum at entry and exit (`entry_e`, `entry_px`, ... in MeV, as doubles)
-and `path_length` in mm.
+With `RL4PHY_DATASET_DIR` set the server writes one file per gRPC stream as
+`crossings-<time>-<pid>-<n>.parquet`. A Geant4 job opens one stream per worker
+thread, so a job run with `--threads N` leaves up to N files; the reader takes
+the whole directory. A file is written under a `.partial` name and renamed when
+its stream ends, so an unfinished one is never read by mistake. Each row is one
+`StepHit`: `event_id`, `track_id`, `parent_id`, `pdg`, `volume`, the
+four-momentum at entry and exit (`entry_e`, `entry_px`, `entry_py`, `entry_pz`
+and the same for `exit`; MeV, doubles) and `path_length` in mm.
+
+Today the only sender of crossings is `test_client.py`; the Geant4 side starts
+sending them under #45, so a compose run with `RL4PHY_DATASET_DIR` set records
+nothing yet.
 
 ```sh
-uv run dataset_reader.py ../datasets                        # a directory, a file or a glob
-uv run parquet_to_csv.py ../datasets/crossings-*.parquet    # a .csv next to each file
+uv run dataset_reader.py ../datasets     # a directory, a file or a glob; prints a summary
+uv run parquet_to_csv.py ../datasets     # a .csv next to each file
 ```
 
-`dataset_reader.read_crossings` returns a pyarrow table; `energy_loss`,
-`theta`, `theta_xy` and `mass` derive the physics from it. The energy loss is
-what the particle lost, including what its secondaries carried away, not what
-the layer absorbed.
+`dataset_reader.read_crossings` takes a directory (its `crossings-*.parquet`
+files), a file or a glob, reads Parquet or a `.csv` written by
+`parquet_to_csv.py`, and returns a pyarrow table; `energy_loss`, `theta`,
+`theta_xy` and `mass` derive the physics from it. The energy loss is what the
+particle lost, including what its secondaries carried away, not what the layer
+absorbed.
 
 ## Trying it without Geant4
 
 ```sh
-RL4PHY_DATASET_DIR=/tmp/crossings uv run server.py   # terminal A
+RL4PHY_DATASET_DIR=/tmp/crossings uv run server.py   # terminal A, with the viewer up or RERUN=off
 uv run test_client.py 10000                           # terminal B: 10000 fake crossings
 uv run test_client.py 1000 plane                      # the 300 um plane instead of the 10 mm station
 ```

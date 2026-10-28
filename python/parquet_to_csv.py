@@ -4,13 +4,13 @@ import sys
 import pyarrow.csv as pa_csv
 from loguru import logger
 
-from dataset_reader import read_crossings
+from dataset_reader import crossing_files, read_file
 
 
-def main(paths: list[str]) -> None:
-    for path in paths:
+def main(sources: list[str]) -> None:
+    for path in (path for source in sources for path in crossing_files(source)):
         target = os.path.splitext(path)[0] + ".csv"
-        table = read_crossings(path)
+        table = read_file(path)
         pa_csv.write_csv(table, target)
         logger.info(f"{target}: {table.num_rows} row(s)")
 
