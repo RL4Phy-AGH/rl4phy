@@ -44,6 +44,10 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         for request in request_iterator:
             with self._lock:
                 self._handle_data(request)
+        # The stream is one Geant4 job, and its recording ends with it.
+        with self._lock:
+            if self._writer is not None:
+                self._writer.close()
         return rl4phy_pb2.Reply()
 
     def SendGeometry(self, request, context):

@@ -9,7 +9,9 @@ def test_rows_survive_flush_boundaries(tmp_path, crossings):
     writer = ParquetStepWriter(str(tmp_path), flush_rows=7)
     for hit in crossings:
         writer.append_step_hit(hit)
+    assert os.listdir(tmp_path) == [os.path.basename(writer.path) + ".partial"]
     writer.close()
+    assert os.listdir(tmp_path) == [os.path.basename(writer.path)]
 
     table = pq.read_table(writer.path)
     assert table.schema.equals(STEP_SCHEMA)
@@ -35,19 +37,21 @@ def test_rows_survive_flush_boundaries(tmp_path, crossings):
     ]
 
 
-def test_file_lands_in_the_directory_as_parquet(tmp_path):
+def test_no_crossings_leave_no_file(tmp_path):
     writer = ParquetStepWriter(str(tmp_path))
     writer.close()
-    assert os.path.dirname(writer.path) == str(tmp_path)
-    assert os.path.basename(writer.path).startswith("crossings-")
-    assert writer.path.endswith(".parquet")
+    assert writer.path is None
+    assert os.listdir(tmp_path) == []
 
 
-def test_close_is_final(tmp_path, crossings):
+def test_close_ends_the_file_and_the_next_crossing_starts_another(tmp_path, crossings):
     writer = ParquetStepWriter(str(tmp_path))
     writer.append_step_hit(crossings[0])
     writer.close()
+    first = writer.path
     writer.append_step_hit(crossings[1])
     writer.close()
-    assert writer.rows_written == 1
+    assert first != writer.path
+    assert os.path.basename(first).startswith("crossings-")
+    assert pq.read_table(first).num_rows == 1
     assert pq.read_table(writer.path).num_rows == 1

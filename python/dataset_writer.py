@@ -49,23 +49,37 @@ def _step_row(hit) -> tuple:
     )
 
 
+# One file per stream, which is one Geant4 job: the file opens with the first
+# crossing and close() ends it, so a job that sends no crossings leaves nothing.
 class ParquetStepWriter:
     def __init__(self, directory: str, flush_rows: int = DEFAULT_FLUSH_ROWS) -> None:
         os.makedirs(directory, exist_ok=True)
-        name = f"{FILE_PREFIX}-{int(time.time())}-{os.getpid()}.parquet"
-        self.path = os.path.join(directory, name)
+        self._directory = directory
         self._flush_rows = flush_rows
-        self._writer = pq.ParquetWriter(self.path, STEP_SCHEMA, compression="zstd")
+        self._files = 0
+        self._file: pq.ParquetWriter | None = None
         self._rows: list[tuple] = []
+        self.path: str | None = None
         self.rows_written = 0
-        self._closed = False
 
     def append_step_hit(self, hit) -> None:
-        if self._closed:
-            return
+        if self._file is None:
+            self._open()
         self._rows.append(_step_row(hit))
         if len(self._rows) >= self._flush_rows:
             self.flush()
+
+    def _open(self) -> None:
+        self._files += 1
+        name = f"{FILE_PREFIX}-{int(time.time())}-{os.getpid()}-{self._files}.parquet"
+        self.path = os.path.join(self._directory, name)
+        # Written under a temporary name and renamed when complete, so a reader
+        # never opens a file without its footer.
+        self._file = pq.ParquetWriter(
+            f"{self.path}.partial", STEP_SCHEMA, compression="zstd"
+        )
+        self.rows_written = 0
+        logger.info(f"Dataset: recording crossings to {self.path}")
 
     def flush(self) -> None:
         if not self._rows:
@@ -78,22 +92,22 @@ class ParquetStepWriter:
             ],
             schema=STEP_SCHEMA,
         )
-        self._writer.write_batch(batch)
+        self._file.write_batch(batch)
         self.rows_written += len(self._rows)
         self._rows.clear()
 
     def close(self) -> None:
-        if self._closed:
+        if self._file is None:
             return
         self.flush()
-        self._writer.close()
-        self._closed = True
+        self._file.close()
+        self._file = None
+        os.replace(f"{self.path}.partial", self.path)
         logger.info(f"Dataset: wrote {self.rows_written} crossing(s) to {self.path}")
 
 
 def maybe_create_step_writer(directory: str | None) -> ParquetStepWriter | None:
     if not directory:
         return None
-    writer = ParquetStepWriter(directory)
-    logger.info(f"Dataset: recording crossings to {writer.path}")
-    return writer
+    logger.info(f"Dataset: recording crossings under {directory}")
+    return ParquetStepWriter(directory)

@@ -8,11 +8,15 @@ class RecordingWriter:
     def __init__(self, fail: bool = False) -> None:
         self.hits = []
         self.fail = fail
+        self.closed = 0
 
     def append_step_hit(self, hit) -> None:
         if self.fail:
             raise OSError("disk full")
         self.hits.append(hit)
+
+    def close(self) -> None:
+        self.closed += 1
 
 
 class RecordingView:
@@ -49,6 +53,7 @@ def test_crossings_go_to_the_writer(crossings):
         ),
     )
     assert writer.hits == crossings[:4]
+    assert writer.closed == 1
 
 
 def test_trajectories_go_to_the_view():
