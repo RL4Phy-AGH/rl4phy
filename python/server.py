@@ -11,7 +11,7 @@ import rl4phy_pb2
 import rl4phy_pb2_grpc
 from dataset_writer import ParquetStepWriter, maybe_create_step_writer
 from gdml_geometry import parse_gdml_bytes
-from rerun_view import DEFAULT_URL, RerunView
+from rerun_view import DEFAULT_VIEWER_URL, RerunView
 
 # Read off the proto rather than listed, so the handler table and its test
 # cannot drift from it.
@@ -19,15 +19,20 @@ PAYLOAD_KINDS = {
     f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields
 }
 
+# Every Geant4 worker thread holds one stream open for the whole job, and the
+# geometry of the next run arrives as a separate call that needs a free worker,
+# or it waits behind the streams until the client gives up on it.
+MAX_GEANT4_THREADS = 15
+
 
 class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
     def __init__(self, writer: ParquetStepWriter | None, view: RerunView) -> None:
         self.msg = 0
         self._writer = writer
         self._view = view
-        # Taken per message, not per stream: every Geant4 thread keeps its
-        # stream open for the whole job, and the geometry of the next run
-        # arrives as a separate call that has to get in between the messages.
+        self._open_streams = 0
+        # Taken per message, not per stream, so the geometry call gets in
+        # between the messages of the streams that stay open.
         self._lock = threading.Lock()
         self._handlers = {
             "event_scoring": self._log_b1_event,
@@ -41,14 +46,19 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             logger.warning(f"No handler for payload(s): {sorted(missing)}")
 
     def SendDataStream(self, request_iterator, context):
-        for request in request_iterator:
-            with self._lock:
-                self._handle_data(request)
-        # The stream ends with the Geant4 thread that opened it, and so does
-        # its file.
         with self._lock:
-            if self._writer is not None:
-                self._writer.close()
+            self._open_streams += 1
+        try:
+            for request in request_iterator:
+                with self._lock:
+                    self._handle_data(request)
+        finally:
+            with self._lock:
+                self._open_streams -= 1
+                # The streams of a job end together, so the recording ends
+                # with the last of them.
+                if self._open_streams == 0 and self._writer is not None:
+                    self._writer.close()
         return rl4phy_pb2.Reply()
 
     def SendGeometry(self, request, context):
@@ -84,7 +94,7 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
     def _record_step_hit(self, hit) -> None:
         logger.info(f"[{self.msg}] crossing: event={hit.event_id} track={hit.track_id}")
-        self._record(hit)
+        self._record_crossing(hit)
 
     def _record_event_step_hits(self, event) -> None:
         logger.info(
@@ -92,14 +102,14 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             f"{len(event.hits)} crossing(s)"
         )
         for hit in event.hits:
-            self._record(hit)
+            self._record_crossing(hit)
 
-    def _record(self, hit) -> None:
+    def _record_crossing(self, hit) -> None:
         if not hit.HasField("exit") or hit.exit.e == 0.0:
             # A crossing without an exit is not a crossing, and a zeroed exit
             # would read as the whole beam energy lost.
             logger.warning(
-                f"[{self.msg}] crossing without an exit: "
+                f"[{self.msg}] crossing without a usable exit: "
                 f"event={hit.event_id} track={hit.track_id}"
             )
             return
@@ -133,10 +143,7 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
 
 def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) -> None:
-    # One worker per open stream (one per Geant4 thread, held for the whole
-    # job) plus a free one for the geometry call, or the second run's geometry
-    # waits behind the streams until the client gives up on it.
-    executor = futures.ThreadPoolExecutor(max_workers=16)
+    executor = futures.ThreadPoolExecutor(max_workers=MAX_GEANT4_THREADS + 1)
     server = grpc.server(executor)
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(
         SendServicer(writer, view), server
@@ -163,7 +170,7 @@ def main() -> None:
     logger.remove()
     logger.add(sys.stdout)
     view = RerunView(
-        url=os.environ.get("RL4PHY_RERUN_URL", DEFAULT_URL),
+        url=os.environ.get("RL4PHY_RERUN_URL", DEFAULT_VIEWER_URL),
         max_labels=int(os.environ.get("RL4PHY_MAX_LABELS", "0")),
     )
     writer = maybe_create_step_writer(os.environ.get("RL4PHY_DATASET_DIR"))

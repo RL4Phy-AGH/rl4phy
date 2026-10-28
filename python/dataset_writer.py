@@ -49,9 +49,8 @@ def _step_row(hit) -> tuple:
     )
 
 
-# One file per stream, and a Geant4 job opens one stream per worker thread. The
-# file opens with the first crossing and close() ends it, so a stream that sends
-# no crossings leaves nothing behind.
+# Opened by the first crossing, not in __init__, so a run that records nothing
+# leaves no file behind.
 class ParquetStepWriter:
     def __init__(self, directory: str, flush_rows: int = DEFAULT_FLUSH_ROWS) -> None:
         os.makedirs(directory, exist_ok=True)

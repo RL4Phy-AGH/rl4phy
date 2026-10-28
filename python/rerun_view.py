@@ -8,6 +8,9 @@ from loguru import logger
 
 from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid
 
+DEFAULT_VIEWER_URL = "rerun+http://127.0.0.1:9876/proxy"
+FLUSH_TIMEOUT_S = 2
+
 
 def _path_color(path: str) -> list[int]:
     # Stable across runs, unlike hash(), so a subdetector keeps its colour.
@@ -26,12 +29,8 @@ def _charge_color(charge: float) -> list[int]:
     return [0, 255, 0]
 
 
-DEFAULT_URL = "rerun+http://127.0.0.1:9876/proxy"
-FLUSH_TIMEOUT_S = 2
-
-
 class RerunView:
-    def __init__(self, url: str = DEFAULT_URL, max_labels: int = 0) -> None:
+    def __init__(self, url: str = DEFAULT_VIEWER_URL, max_labels: int = 0) -> None:
         rr.init("rl4phy")
         rr.connect_grpc(url)
         logger.info(f"Sending to the Rerun viewer at {url}")

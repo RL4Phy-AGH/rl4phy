@@ -1,3 +1,4 @@
+import argparse
 import glob
 import os
 import sys
@@ -38,8 +39,6 @@ def _momentum(table: pa.Table, point: str) -> np.ndarray:
     )
 
 
-# What the primary lost, including what its secondaries carried away: not the
-# energy deposited in the layer.
 def energy_loss(table: pa.Table) -> np.ndarray:
     return table["entry_e"].to_numpy() - table["exit_e"].to_numpy()
 
@@ -91,4 +90,6 @@ def main(source: str) -> None:
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stdout)
-    main(sys.argv[1])
+    parser = argparse.ArgumentParser()
+    parser.add_argument("source", help="a directory, a file or a glob")
+    main(parser.parse_args().source)

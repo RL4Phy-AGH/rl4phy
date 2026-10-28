@@ -1,3 +1,4 @@
+import argparse
 import math
 import random
 import sys
@@ -124,7 +125,8 @@ def main(
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stdout)
-    main(
-        events=int(sys.argv[1]) if len(sys.argv) > 1 else 10_000,
-        layer=LAYERS[sys.argv[2]] if len(sys.argv) > 2 else STATION_10MM,
-    )
+    parser = argparse.ArgumentParser()
+    parser.add_argument("events", nargs="?", type=int, default=10_000)
+    parser.add_argument("layer", nargs="?", choices=LAYERS, default="station")
+    args = parser.parse_args()
+    main(events=args.events, layer=LAYERS[args.layer])

@@ -56,6 +56,21 @@ def test_crossings_go_to_the_writer(crossings):
     assert writer.closed == 1
 
 
+def test_recording_ends_with_the_last_stream(crossings):
+    writer = RecordingWriter()
+    servicer = SendServicer(writer, RecordingView())
+
+    def outer_stream():
+        yield rl4phy_pb2.Data(step_hit=crossings[0])
+        send(servicer, rl4phy_pb2.Data(step_hit=crossings[1]))
+        assert writer.closed == 0
+        yield rl4phy_pb2.Data(step_hit=crossings[2])
+
+    servicer.SendDataStream(outer_stream(), None)
+    assert writer.hits == crossings[:3]
+    assert writer.closed == 1
+
+
 def test_trajectories_go_to_the_view():
     view = RecordingView()
     servicer = SendServicer(writer=None, view=view)

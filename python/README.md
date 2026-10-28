@@ -10,7 +10,7 @@ truth and the Docker image installs from it, so keep it committed.
 | `server.py` | entry point: reads the environment, one handler per payload of `proto/rl4phy.proto` |
 | `rerun_view.py` | everything that talks to Rerun: the connection, geometry, trajectories |
 | `gdml_geometry.py` | turns the GDML sent at the start of a run into drawable solids |
-| `dataset_writer.py` | records `StepHit` crossings, one Parquet file per gRPC stream |
+| `dataset_writer.py` | records `StepHit` crossings, one Parquet file per Geant4 job |
 | `dataset_reader.py` | reads recordings back, Parquet or CSV, and derives energy loss, scattering angle and mass |
 | `parquet_to_csv.py` | exports a recording to CSV (#38) |
 | `test_client.py` | sends fake data, including generated crossings, to a running server |
@@ -67,11 +67,11 @@ off.
 
 ## Recording crossings
 
-With `RL4PHY_DATASET_DIR` set the server writes one file per gRPC stream as
-`crossings-<time>-<pid>-<n>.parquet`. A Geant4 job opens one stream per worker
-thread, so a job run with `--threads N` leaves up to N files; the reader takes
-the whole directory. A file is written under a `.partial` name and renamed when
-its stream ends, so an unfinished one is never read by mistake. Each row is one
+With `RL4PHY_DATASET_DIR` set the server writes one file per Geant4 job as
+`crossings-<time>-<pid>-<n>.parquet`: it opens with the first crossing and
+closes when the last of the job's streams ends (a job opens one per worker
+thread). The file is written under a `.partial` name and renamed when complete,
+so an unfinished one is never read by mistake. Each row is one
 `StepHit`: `event_id`, `track_id`, `parent_id`, `pdg`, `volume`, the
 four-momentum at entry and exit (`entry_e`, `entry_px`, `entry_py`, `entry_pz`
 and the same for `exit`; MeV, doubles) and `path_length` in mm.
