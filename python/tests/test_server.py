@@ -15,14 +15,28 @@ class RecordingWriter:
         self.hits.append(hit)
 
 
+class RecordingView:
+    def __init__(self) -> None:
+        self.events = []
+
+    def geometry(self, solids) -> None:
+        pass
+
+    def trajectories(self, event, msg: int) -> None:
+        self.events.append((event.event_id, msg))
+
+    def close(self) -> None:
+        pass
+
+
 def test_every_payload_has_a_handler():
-    servicer = AgentServer(writer=None)
+    servicer = AgentServer(writer=None, view=RecordingView())
     assert PAYLOADS <= set(servicer._handlers)
 
 
 def test_crossings_go_to_the_writer(crossings):
     writer = RecordingWriter()
-    servicer = AgentServer(writer)
+    servicer = AgentServer(writer, RecordingView())
     servicer._handle_data(rl4phy_pb2.Data(step_hit=crossings[0]))
     servicer._handle_data(
         rl4phy_pb2.Data(
@@ -32,9 +46,19 @@ def test_crossings_go_to_the_writer(crossings):
     assert writer.hits == crossings[:4]
 
 
+def test_trajectories_go_to_the_view():
+    view = RecordingView()
+    servicer = AgentServer(writer=None, view=view)
+    servicer._handle_data(rl4phy_pb2.Data(event_scoring=rl4phy_pb2.EventScoring()))
+    servicer._handle_data(
+        rl4phy_pb2.Data(event_trajectories=rl4phy_pb2.EventTrajectories(event_id=9))
+    )
+    assert view.events == [(9, 2)]
+
+
 def test_crossing_without_exit_is_skipped(crossings):
     writer = RecordingWriter()
-    servicer = AgentServer(writer)
+    servicer = AgentServer(writer, RecordingView())
     half = rl4phy_pb2.StepHit(track_id=1, event_id=2, entry=crossings[0].entry)
     servicer._handle_data(rl4phy_pb2.Data(step_hit=half))
     assert writer.hits == []
@@ -44,7 +68,7 @@ def test_unknown_payload_is_logged_not_raised():
     messages = []
     sink = logger.add(messages.append, level="WARNING")
     try:
-        AgentServer(writer=None)._handle_data(rl4phy_pb2.Data())
+        AgentServer(writer=None, view=RecordingView())._handle_data(rl4phy_pb2.Data())
     finally:
         logger.remove(sink)
     assert any("unknown payload" in message for message in messages)
@@ -52,7 +76,7 @@ def test_unknown_payload_is_logged_not_raised():
 
 def test_write_error_disables_recording(crossings):
     writer = RecordingWriter(fail=True)
-    servicer = AgentServer(writer)
+    servicer = AgentServer(writer, RecordingView())
     servicer._handle_data(rl4phy_pb2.Data(step_hit=crossings[0]))
     assert servicer._writer is None
     writer.fail = False
