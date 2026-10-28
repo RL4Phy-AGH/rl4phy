@@ -29,8 +29,10 @@ Three conventions here are easy to get wrong, and B5 exercises all three:
 
 from __future__ import annotations
 
+import functools
 import math
 import re
+import tempfile
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -411,3 +413,12 @@ def parse_gdml(path: str) -> list[PlacedSolid]:
             f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing"
         )
     return walk.solids
+
+
+@functools.lru_cache(maxsize=8)
+def parse_gdml_bytes(gdml: bytes) -> list[PlacedSolid]:
+    # pyg4ometry takes a path, not bytes.
+    with tempfile.NamedTemporaryFile(suffix=".gdml", delete_on_close=False) as handle:
+        handle.write(gdml)
+        handle.close()
+        return parse_gdml(handle.name)
