@@ -26,14 +26,15 @@ def _charge_color(charge: float) -> list[int]:
     return [0, 255, 0]
 
 
+DEFAULT_URL = "rerun+http://127.0.0.1:9876/proxy"
+FLUSH_TIMEOUT_S = 2
+
+
 class RerunView:
-    def __init__(self, max_labels: int = 0, port: int = 9876) -> None:
+    def __init__(self, url: str = DEFAULT_URL, max_labels: int = 0) -> None:
         rr.init("rl4phy")
-        uri = rr.serve_grpc(grpc_port=port)
-        logger.info(f"Rerun gRPC server on port {port} ({uri})")
-        logger.info(
-            f"Connect the viewer with: rerun --connect rerun+http://127.0.0.1:{port}/proxy"
-        )
+        rr.connect_grpc(url)
+        logger.info(f"Sending to the Rerun viewer at {url}")
         # A property of the recording, not of any one detector, so a producer that
         # sends no geometry still gets its tracks drawn the right way up.
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
@@ -49,7 +50,7 @@ class RerunView:
         self._events_seen += 1
         return slot
 
-    def geometry(self, solids: list[PlacedSolid]) -> None:
+    def draw_geometry(self, solids: list[PlacedSolid]) -> None:
         # Where the next event will land, which is where geometry has to go for
         # Rerun's latest-at lookup to pair every event with the detector it was
         # simulated on. Drawn on every arrival, even a repeat: B5/run1.mac ends at
@@ -115,7 +116,7 @@ class RerunView:
                 )
             rr.log(entity, archetype)
 
-    def trajectories(self, event, msg: int) -> None:
+    def draw_trajectories(self, event) -> None:
         tracks = event.trajectories
         # The wire flattens each polyline into x,y,z triples.
         polylines = [
@@ -155,14 +156,17 @@ class RerunView:
         species = Counter(t.particle_name for t in tracks)
         tally = ", ".join(f"{n} {name}" for name, n in species.most_common())
         logger.info(
-            f"[{msg}] tracks: event={event.event_id} (index {slot})  "
+            f"tracks: event={event.event_id} (index {slot})  "
             f"{len(tracks)} track(s), {len(points)} point(s)  "
             f"[{tally}]"
         )
 
     def close(self) -> None:
         try:
-            rr.get_global_data_recording().flush(timeout_sec=2)
+            rr.get_global_data_recording().flush(timeout_sec=FLUSH_TIMEOUT_S)
         except Exception:
-            logger.warning("Rerun did not flush in 2 s; the last events may be missing")
+            logger.warning(
+                f"Rerun did not flush in {FLUSH_TIMEOUT_S} s; "
+                "the last events may be missing"
+            )
         rr.disconnect()

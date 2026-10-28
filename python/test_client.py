@@ -1,6 +1,7 @@
 import math
 import random
 import sys
+from typing import NamedTuple
 
 import grpc
 from loguru import logger
@@ -10,23 +11,21 @@ import rl4phy_pb2_grpc
 
 MASS_MU = 105.6583755
 
-# Most probable energy loss and Landau width (MeV) and the Highland angle (rad)
-# of a 160 GeV muon in the 10 mm silicon station of the MUonE test geometry,
-# and the same for the 300 um plane of the one-plane case.
-STATION_10MM = {
-    "volume": "Station1",
-    "thickness_mm": 10.0,
-    "mpv": 3.43,
-    "xi": 0.178,
-    "theta0": 2.54e-5,
-}
-PLANE_300UM = {
-    "volume": "Plane",
-    "thickness_mm": 0.3,
-    "mpv": 0.0842,
-    "xi": 0.00535,
-    "theta0": 3.76e-6,
-}
+
+class Layer(NamedTuple):
+    volume: str
+    thickness_mm: float
+    mpv_mev: float
+    xi_mev: float
+    theta0_rad: float
+
+
+# A 160 GeV muon: most probable Landau loss and width, Highland angle, in the
+# 10 mm silicon station of the MUonE test geometry and in the 300 um plane of
+# the one-plane case.
+STATION_10MM = Layer("Station1", 10.0, 3.43, 0.178, 2.54e-5)
+PLANE_300UM = Layer("Plane", 0.3, 0.0842, 0.00535, 3.76e-6)
+LAYERS = {"station": STATION_10MM, "plane": PLANE_300UM}
 
 
 def fake_crossings(
@@ -34,7 +33,7 @@ def fake_crossings(
     seed: int,
     *,
     e_in: float = 160_000.0,
-    layer: dict = STATION_10MM,
+    layer: Layer = STATION_10MM,
 ) -> list[rl4phy_pb2.StepHit]:
     rng = random.Random(seed)
     p_in = math.sqrt(e_in**2 - MASS_MU**2)
@@ -42,12 +41,12 @@ def fake_crossings(
     for event_id in range(events):
         # -ln(Z^2) of a standard normal Z is Moyal distributed: a Landau look-alike
         # with its most probable value at 0.
-        loss = layer["mpv"] + layer["xi"] * -math.log(rng.gauss(0.0, 1.0) ** 2)
+        loss = layer.mpv_mev + layer.xi_mev * -math.log(rng.gauss(0.0, 1.0) ** 2)
         e_out = e_in - loss
         p_out = math.sqrt(e_out**2 - MASS_MU**2)
         tx, ty = (
-            math.tan(rng.gauss(0.0, layer["theta0"])),
-            math.tan(rng.gauss(0.0, layer["theta0"])),
+            math.tan(rng.gauss(0.0, layer.theta0_rad)),
+            math.tan(rng.gauss(0.0, layer.theta0_rad)),
         )
         norm = math.sqrt(tx**2 + ty**2 + 1.0)
         hits.append(
@@ -56,18 +55,23 @@ def fake_crossings(
                 event_id=event_id,
                 parent_id=0,
                 pdg=13,
-                volume=layer["volume"],
+                volume=layer.volume,
                 entry=rl4phy_pb2.LorentzVector(e=e_in, px=0.0, py=0.0, pz=p_in),
                 exit=rl4phy_pb2.LorentzVector(
                     e=e_out, px=p_out * tx / norm, py=p_out * ty / norm, pz=p_out / norm
                 ),
-                path_length=layer["thickness_mm"] * norm,
+                path_length=layer.thickness_mm * norm,
             )
         )
     return hits
 
 
-def main(host: str = "localhost:50051", events: int = 10_000, seed: int = 0) -> None:
+def main(
+    host: str = "localhost:50051",
+    events: int = 10_000,
+    seed: int = 0,
+    layer: Layer = STATION_10MM,
+) -> None:
     b1 = rl4phy_pb2.Data(event_scoring=rl4phy_pb2.EventScoring(edep=0.042, event_id=7))
 
     # Every calorimeter cell is sent, empty ones included: 80 EM, 20 hadronic.
@@ -106,15 +110,21 @@ def main(host: str = "localhost:50051", events: int = 10_000, seed: int = 0) -> 
         rl4phy_pb2.Data(
             event_step_hits=rl4phy_pb2.EventStepHits(event_id=hit.event_id, hits=[hit])
         )
-        for hit in fake_crossings(events, seed)
+        for hit in fake_crossings(events, seed, layer=layer)
     ]
 
     stub = rl4phy_pb2_grpc.SendServiceStub(grpc.insecure_channel(host))
     stub.SendDataStream(iter([b1, b5, trajectories, *crossings]))
-    logger.info(f"Sent B1 + B5 + one trajectory event + {events} crossing event(s)")
+    logger.info(
+        f"Sent B1 + B5 + one trajectory event + {events} crossing event(s) "
+        f"through {layer.volume}"
+    )
 
 
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stdout)
-    main()
+    main(
+        events=int(sys.argv[1]) if len(sys.argv) > 1 else 10_000,
+        layer=LAYERS[sys.argv[2]] if len(sys.argv) > 2 else STATION_10MM,
+    )

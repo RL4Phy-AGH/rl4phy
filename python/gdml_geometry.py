@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import functools
 import math
-import os
 import re
 import tempfile
 from dataclasses import dataclass, field
@@ -419,9 +418,7 @@ def parse_gdml(path: str) -> list[PlacedSolid]:
 @functools.lru_cache(maxsize=8)
 def parse_gdml_bytes(gdml: bytes) -> list[PlacedSolid]:
     # pyg4ometry takes a path, not bytes.
-    with tempfile.NamedTemporaryFile(suffix=".gdml", delete=False) as handle:
+    with tempfile.NamedTemporaryFile(suffix=".gdml", delete_on_close=False) as handle:
         handle.write(gdml)
-    try:
+        handle.close()
         return parse_gdml(handle.name)
-    finally:
-        os.unlink(handle.name)

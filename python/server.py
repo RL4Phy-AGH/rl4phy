@@ -1,6 +1,7 @@
 import os
 import signal
 import sys
+import threading
 from concurrent import futures
 
 import grpc
@@ -10,11 +11,13 @@ import rl4phy_pb2
 import rl4phy_pb2_grpc
 from dataset_writer import ParquetStepWriter, maybe_create_step_writer
 from gdml_geometry import parse_gdml_bytes
-from rerun_view import RerunView
+from rerun_view import DEFAULT_URL, RerunView
 
-# Every branch of the oneof, read off the proto so the handler table below and
-# its test cannot drift from it.
-PAYLOADS = {f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields}
+# Read off the proto rather than listed, so the handler table and its test
+# cannot drift from it.
+PAYLOAD_KINDS = {
+    f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields
+}
 
 
 class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
@@ -22,6 +25,10 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         self.msg = 0
         self._writer = writer
         self._view = view
+        # Taken per message, not per stream: every Geant4 thread keeps its
+        # stream open for the whole job, and the geometry of the next run
+        # arrives as a separate call that has to get in between the messages.
+        self._lock = threading.Lock()
         self._handlers = {
             "event_scoring": self._log_b1_event,
             "step_hit": self._record_step_hit,
@@ -29,13 +36,14 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             "b5_event": self._log_b5_event,
             "event_trajectories": self._draw_trajectories,
         }
-        missing = PAYLOADS - set(self._handlers)
+        missing = PAYLOAD_KINDS - set(self._handlers)
         if missing:
             logger.warning(f"No handler for payload(s): {sorted(missing)}")
 
     def SendDataStream(self, request_iterator, context):
         for request in request_iterator:
-            self._handle_data(request)
+            with self._lock:
+                self._handle_data(request)
         return rl4phy_pb2.Reply()
 
     def SendGeometry(self, request, context):
@@ -50,7 +58,8 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             logger.warning("GDML received over gRPC has no drawable volumes")
             return rl4phy_pb2.Reply()
 
-        self._view.geometry(solids)
+        with self._lock:
+            self._view.draw_geometry(solids)
         return rl4phy_pb2.Reply()
 
     def _handle_data(self, request) -> None:
@@ -68,24 +77,28 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             f"edep = {event.edep:.6f} MeV"
         )
 
+    def _record_step_hit(self, hit) -> None:
+        logger.info(f"[{self.msg}] crossing: event={hit.event_id} track={hit.track_id}")
+        self._record(hit)
+
     def _record_event_step_hits(self, event) -> None:
         logger.info(
             f"[{self.msg}] crossings: event={event.event_id}  "
             f"{len(event.hits)} crossing(s)"
         )
         for hit in event.hits:
-            self._record_step_hit(hit)
+            self._record(hit)
 
-    def _record_step_hit(self, hit) -> None:
-        if self._writer is None:
-            return
-        if not hit.HasField("exit"):
+    def _record(self, hit) -> None:
+        if not hit.HasField("exit") or hit.exit.e == 0.0:
             # A crossing without an exit is not a crossing, and a zeroed exit
             # would read as the whole beam energy lost.
             logger.warning(
-                f"[{self.msg}] step_hit without exit: "
+                f"[{self.msg}] crossing without an exit: "
                 f"event={hit.event_id} track={hit.track_id}"
             )
+            return
+        if self._writer is None:
             return
         try:
             self._writer.append_step_hit(hit)
@@ -94,7 +107,8 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             self._writer = None
 
     def _draw_trajectories(self, event) -> None:
-        self._view.trajectories(event, self.msg)
+        logger.info(f"[{self.msg}] event_trajectories: event={event.event_id}")
+        self._view.draw_trajectories(event)
 
     def _log_b5_event(self, event) -> None:
         chamber_hits = ", ".join(str(n) for n in event.drift_chamber_hits)
@@ -114,30 +128,40 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
 
 def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) -> None:
-    # One worker: the handlers share the writer and the view without a lock,
-    # and geometry has to be drawn before the stream that follows it.
-    server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
+    # One worker per open stream (one per Geant4 thread, held for the whole
+    # job) plus a free one for the geometry call, or the second run's geometry
+    # waits behind the streams until the client gives up on it.
+    executor = futures.ThreadPoolExecutor(max_workers=16)
+    server = grpc.server(executor)
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(
         SendServicer(writer, view), server
     )
-    server.add_insecure_port(f"0.0.0.0:{port}")
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: server.stop(grace=5))
     try:
+        server.add_insecure_port(f"0.0.0.0:{port}")
         server.start()
         logger.info(f"Listening on port {port}, waiting for Geant4 data...")
         server.wait_for_termination()
     finally:
-        if writer is not None:
-            writer.close()
-        view.close()
+        # A handler can still be mid-message when the grace period cuts the
+        # stream; let it finish before the writer and the view go away.
+        executor.shutdown(wait=True)
+        try:
+            if writer is not None:
+                writer.close()
+        finally:
+            view.close()
 
 
 def main() -> None:
     logger.remove()
     logger.add(sys.stdout)
+    view = RerunView(
+        url=os.environ.get("RL4PHY_RERUN_URL", DEFAULT_URL),
+        max_labels=int(os.environ.get("RL4PHY_MAX_LABELS", "0")),
+    )
     writer = maybe_create_step_writer(os.environ.get("RL4PHY_DATASET_DIR"))
-    view = RerunView(max_labels=int(os.environ.get("RL4PHY_MAX_LABELS", "0")))
     serve(writer, view)
 
 
