@@ -54,7 +54,8 @@ class RerunView:
         # Rerun's latest-at lookup to pair every event with the detector it was
         # simulated on. Drawn on every arrival, even a repeat: B5/run1.mac ends at
         # the arm angle it started at, and skipping the repeat would resolve its
-        # last run back to the geometry before it.
+        # last run back to the geometry before it. Events of the previous run
+        # still in flight land after it; the wire carries no run id to tell.
         slot = self._events_seen
         logger.info(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
         # On the timeline rather than static, because B5 rebuilds its detector mid

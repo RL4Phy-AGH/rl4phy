@@ -54,10 +54,10 @@ uv run server.py         # the server, in another terminal
 ```
 
 The server sends its drawing to a Rerun viewer, by default the one on this
-machine. Under docker compose (from the repository root, `docker compose up
---build`) the viewer is its own service and runs in the browser at
-http://localhost:9090. `RERUN=off` in the server's environment turns drawing
-off.
+machine; without one it waits a few seconds at start-up and at shutdown. Under
+docker compose (from the repository root, `docker compose up --build`) the
+viewer is its own service and runs in the browser at http://localhost:9090.
+`RERUN=off` in the server's environment turns drawing off.
 
 | Variable | Meaning |
 |---|---|

@@ -21,8 +21,9 @@ PAYLOAD_KINDS = {
 
 # Every Geant4 worker thread holds one stream open for the whole job, and the
 # geometry of the next run arrives as a separate call that needs a free worker,
-# or it waits behind the streams until the client gives up on it.
-MAX_GEANT4_THREADS = 15
+# or it waits behind the streams until the client gives up on it. Generous,
+# because a worker thread is only created once it is needed.
+MAX_GEANT4_THREADS = 63
 
 
 class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
@@ -162,6 +163,8 @@ def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) 
         try:
             if writer is not None:
                 writer.close()
+        except Exception:
+            logger.exception("Dataset: the last file could not be closed")
         finally:
             view.close()
 

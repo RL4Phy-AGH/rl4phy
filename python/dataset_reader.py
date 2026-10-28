@@ -61,8 +61,9 @@ def theta(table: pa.Table) -> np.ndarray:
 def theta_xy(table: pa.Table) -> tuple[np.ndarray, np.ndarray]:
     p_in, p_out = _momentum(table, "entry"), _momentum(table, "exit")
     u = p_in / np.linalg.norm(p_in, axis=1, keepdims=True)
-    # A transverse basis around the entry direction, taken from x unless the
-    # particle flies along x.
+    # A right-handed basis (e1, e2, u) around the entry direction: e1 in the
+    # plane of x and the entry direction (of y, for a particle along x), so for
+    # a beam along z the two angles are the detector x and y projections.
     seed = np.where(np.abs(u[:, :1]) < 0.9, [[1.0, 0.0, 0.0]], [[0.0, 1.0, 0.0]])
     e1 = seed - np.sum(seed * u, axis=1, keepdims=True) * u
     e1 /= np.linalg.norm(e1, axis=1, keepdims=True)
