@@ -2,8 +2,6 @@ import colorsys
 import hashlib
 import os
 import sys
-import threading
-import time
 import zlib
 from collections import Counter
 from concurrent import futures
@@ -16,7 +14,7 @@ from loguru import logger
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
-from dataset_writer import maybe_create_step_writer
+from dataset_writer import ParquetStepWriter, maybe_create_step_writer
 from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid, parse_gdml
 
 RERUN_GRPC_PORT = 9876
@@ -27,9 +25,9 @@ GDML_GRPC_RECEIVED_PATH = os.environ.get(
 
 MAX_LABELS_DRAWN = int(os.environ.get("RL4PHY_MAX_LABELS", "0"))
 
-# MUonE marks no end of event, so a quiet stream is the only thing left that can
-# say its last event is over.
-TRACK_IDLE_FLUSH_S = 1.0
+# Every branch of the oneof, read off the proto so the handler table below and
+# its test cannot drift from it.
+PAYLOADS = {f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields}
 
 
 _PARSED_GDML: dict[str, list[PlacedSolid]] = {}
@@ -124,29 +122,6 @@ def log_detector(solids: list[PlacedSolid], slot: int) -> None:
         rr.log(entity, archetype)
 
 
-_PARTICLES: dict[int, tuple[str, list[int]]] = {
-    22: ("gamma", [255, 236, 130]),
-    11: ("e-", [90, 160, 255]),
-    -11: ("e+", [255, 130, 130]),
-    13: ("mu-", [80, 220, 210]),
-    -13: ("mu+", [255, 170, 80]),
-    211: ("pi+", [205, 140, 255]),
-    -211: ("pi-", [140, 130, 255]),
-    111: ("pi0", [190, 190, 190]),
-    2212: ("proton", [255, 120, 200]),
-    2112: ("neutron", [150, 205, 150]),
-}
-
-
-def _particle(pdg: int) -> tuple[str, list[int]]:
-    known = _PARTICLES.get(pdg)
-    if known:
-        return known
-    hue = (zlib.crc32(str(pdg).encode()) % 997) / 997.0
-    r, g, b = colorsys.hsv_to_rgb(hue, 0.85, 1.0)
-    return f"pdg {pdg}", [round(r * 255), round(g * 255), round(b * 255)]
-
-
 # Geant4's drawByCharge palette, exactly as G4Colour names it, so a track comes
 # out the same colour here as in the OpenGL window this view is checked against.
 def _charge_color(charge: float) -> list[int]:
@@ -162,122 +137,81 @@ class DrawableTrack(NamedTuple):
     color: list[int]
     species: str
     track_id: int
-    initial_e_kin: float | None = None
+    initial_e_kin: float
 
 
 class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
-    def __init__(self) -> None:
+    def __init__(self, writer: ParquetStepWriter | None) -> None:
         self.msg = 0
-        # Event id first because track ids restart with every event.
-        self._pending: dict[int, dict[tuple[int, int], list[list[float]]]] = {}
-        self._current_event: int | None = None
-        self._event_slots: dict[int, int] = {}
         self._events_seen = 0
-        self._points_drawn: dict[int, int] = {}
-        # B5 marks the end of every event and MUonE does not, so which rule
-        # applies is read off the stream rather than configured.
-        self._event_marker_seen = False
-        self._steps_pending_draw = False
-        self._msg_at_last_check = 0
-        # The buffers are reached from the gRPC worker and the idle flusher.
-        self._lock = threading.Lock()
-        self._dataset = maybe_create_step_writer()
+        self._writer = writer
+        self._handlers = {
+            "event_scoring": self._log_b1_event,
+            "step_hit": self._record_step_hit,
+            "event_step_hits": self._record_event_step_hits,
+            "b5_event": self._log_b5_event,
+            "event_trajectories": self._log_event_trajectories,
+        }
+        missing = PAYLOADS - set(self._handlers)
+        if missing:
+            logger.warning(f"No handler for payload(s): {sorted(missing)}")
+
+    def SendDataStream(self, request_iterator, context):
+        for request in request_iterator:
+            self._handle_data(request)
+        return rl4phy_pb2.Reply()
 
     def _handle_data(self, request) -> None:
         self.msg += 1
         kind = request.WhichOneof("payload")
+        handler = self._handlers.get(kind)
+        if handler is None:
+            logger.warning(f"[{self.msg}] unknown payload {kind!r}")
+            return
+        handler(getattr(request, kind))
 
-        if kind == "event_scoring":
-            s = request.event_scoring
-            logger.info(
-                f"[{self.msg}] B1 event_scoring: event={s.event_id} "
-                f"edep = {s.edep:.6f} MeV"
+    def _log_b1_event(self, event) -> None:
+        logger.info(
+            f"[{self.msg}] B1 event_scoring: event={event.event_id} "
+            f"edep = {event.edep:.6f} MeV"
+        )
+
+    def _record_event_step_hits(self, event) -> None:
+        logger.info(
+            f"[{self.msg}] crossings: event={event.event_id}  "
+            f"{len(event.hits)} crossing(s)"
+        )
+        for hit in event.hits:
+            self._record_step_hit(hit)
+
+    def _record_step_hit(self, hit) -> None:
+        if self._writer is None:
+            return
+        if not hit.HasField("exit"):
+            # A crossing without an exit is not a crossing, and a zeroed exit
+            # would read as the whole beam energy lost.
+            logger.warning(
+                f"[{self.msg}] step_hit without exit: "
+                f"event={hit.event_id} track={hit.track_id}"
             )
-        elif kind == "step_hit":
-            self._log_step_hit(request.step_hit)
-        elif kind == "b5_event":
-            self._log_b5_event(request.b5_event)
-        elif kind == "event_trajectories":
-            self._log_event_trajectories(request.event_trajectories)
-        else:
-            logger.warning(f"[{self.msg}] unknown payload")
-
-    def SendDataStream(self, request_iterator, context):
-        with self._lock:
-            for request in request_iterator:
-                self._handle_data(request)
-        return rl4phy_pb2.Reply()
-
-    def _log_step_hit(self, hit) -> None:
-        if self._dataset is not None:
-            try:
-                self._dataset.append_step_hit(hit)
-            except Exception as exc:
-                logger.warning(f"Dataset: disabling sink after {exc!r}")
-                self._dataset = None
-
-        # A new event id is the only end of event MUonE announces. B5 says so
-        # outright and interleaves events across threads, which would make this
-        # fire on nearly every step, so it stands down once a marker is seen.
-        if (
-            not self._event_marker_seen
-            and self._current_event is not None
-            and self._current_event != hit.event_id
-        ):
-            self._flush_event(self._current_event, complete=True)
-
-        self._current_event = hit.event_id
-        tracks = self._pending.setdefault(hit.event_id, {})
-        tracks.setdefault((hit.track_id, hit.pdg), []).append([hit.x, hit.y, hit.z])
-        self._steps_pending_draw = True
+            return
+        try:
+            self._writer.append_step_hit(hit)
+        except Exception:
+            logger.exception("Dataset: recording disabled after a write error")
+            self._writer = None
 
     # The event id cannot be the timeline position: Geant4 restarts it at 0 on
     # every /run/beamOn and the wire carries no run id, so ids repeat across runs.
-    # This counts forward instead, and holds the position until the event is drawn
-    # for the last time so an early draw is redrawn where it already was.
-    def _event_slot(self, event_id: int) -> int:
-        slot = self._event_slots.get(event_id)
-        if slot is None:
-            slot = self._event_slots[event_id] = self._events_seen
-            self._events_seen += 1
+    # This counts forward instead.
+    def _next_slot(self) -> int:
+        slot = self._events_seen
+        self._events_seen += 1
         return slot
-
-    # complete says whether the event can still gain steps: when it cannot the
-    # buffer goes, when it might a later call redraws it at the same position.
-    def _flush_event(self, event_id: int, *, complete: bool) -> None:
-        buffered = self._pending.get(event_id, {})
-        total_points = sum(len(track) for track in buffered.values())
-        slot = self._event_slot(event_id)
-        already_drawn = self._points_drawn.get(event_id)
-        if complete:
-            self._pending.pop(event_id, None)
-            self._event_slots.pop(event_id, None)
-            self._points_drawn.pop(event_id, None)
-            if self._current_event == event_id:
-                self._current_event = None
-        else:
-            self._points_drawn[event_id] = total_points
-
-        if already_drawn == total_points:
-            return
-
-        tracks: list[DrawableTrack] = []
-        for (track_id, pdg), track in buffered.items():
-            name, color = _particle(pdg)
-            tracks.append(
-                DrawableTrack(
-                    np.asarray(track, dtype=np.float32), color, name, track_id
-                )
-            )
-        self._draw_tracks(event_id, slot, tracks)
 
     # Trajectories arrive whole, only once their stepping is over, so nothing
     # here needs buffering.
     def _log_event_trajectories(self, event) -> None:
-        # Taken and given back at once: there will be no second, fuller draw.
-        slot = self._event_slot(event.event_id)
-        self._event_slots.pop(event.event_id, None)
-
         tracks = [
             DrawableTrack(
                 # The wire flattens each polyline into x,y,z triples.
@@ -289,7 +223,7 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             )
             for t in event.trajectories
         ]
-        self._draw_tracks(event.event_id, slot, tracks)
+        self._draw_tracks(event.event_id, self._next_slot(), tracks)
 
     def _draw_tracks(
         self, event_id: int, slot: int, tracks: list[DrawableTrack]
@@ -306,12 +240,6 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         # number; the real id is logged beside the tracks below.
         rr.set_time("event_index", sequence=slot)
 
-        values: dict[str, object] = {"event_id": event_id}
-        # Only a trajectory carries this, so the step path leaves it off rather
-        # than filling it with zeros.
-        if tracks and all(t.initial_e_kin is not None for t in tracks):
-            values["initial_e_kin"] = [t.initial_e_kin for t in tracks]
-
         # Both archetypes are logged even for an empty event, since that is what
         # clears the previous one off the screen.
         rr.log(
@@ -322,7 +250,10 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
                 labels=[f"{t.species} #{t.track_id}" for t in tracks],
                 show_labels=len(tracks) <= MAX_LABELS_DRAWN,
             ),
-            rr.AnyValues(**values),
+            rr.AnyValues(
+                event_id=event_id,
+                initial_e_kin=[t.initial_e_kin for t in tracks],
+            ),
         )
         rr.log("world/tracks/points", rr.Points3D(points, colors=point_colors))
 
@@ -335,14 +266,6 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
         )
 
     def _log_b5_event(self, event) -> None:
-        # EndOfEventAction runs after every step has been sent, however many
-        # worker threads B5 was started with.
-        self._event_marker_seen = True
-        # B5's trajectories were already drawn and gave their slot back, so
-        # flushing an empty buffer here would blank that picture on a new slot.
-        if event.event_id in self._pending:
-            self._flush_event(event.event_id, complete=True)
-
         chamber_hits = ", ".join(str(n) for n in event.drift_chamber_hits)
         # An arm the particle missed reports -1 instead of a hit time.
         hodoscope_times = ", ".join(
@@ -358,61 +281,27 @@ class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
             f"in {len(event.had_cal_edep)} cells"
         )
 
-    # Runs on the idle flusher thread.
-    def flush_quiet_tracks(self) -> None:
-        with self._lock:
-            if self.msg != self._msg_at_last_check:
-                self._msg_at_last_check = self.msg
-                return
-
-            if not self._pending and not self._event_marker_seen:
-                return
-
-            if self._steps_pending_draw:
-                # One quiet interval could still be a lull mid event, so draw what
-                # is held without giving it up.
-                self._steps_pending_draw = False
-                for event_id in list(self._pending):
-                    self._flush_event(event_id, complete=False)
-                return
-
-            # Two quiet intervals, so the run has ended. This service outlives any
-            # one example, and a MUonE run started after a B5 one would otherwise
-            # find the marker rule latched on and never complete an event.
-            self._pending.clear()
-            self._event_slots.clear()
-            self._points_drawn.clear()
-            self._event_marker_seen = False
-            self._current_event = None
-
     def SendGeometry(self, request, context):
-        with self._lock:
-            logger.info(f"Received GDML over gRPC: {len(request.gdml)} bytes")
-            try:
-                solids = _parse_received_gdml(request.gdml)
-            except Exception:
-                logger.exception("Could not parse the GDML received over gRPC")
-                return rl4phy_pb2.Reply()
+        logger.info(f"Received GDML over gRPC: {len(request.gdml)} bytes")
+        try:
+            solids = _parse_received_gdml(request.gdml)
+        except Exception:
+            logger.exception("Could not parse the GDML received over gRPC")
+            return rl4phy_pb2.Reply()
 
-            if not solids:
-                logger.warning("GDML received over gRPC has no drawable volumes")
-                return rl4phy_pb2.Reply()
+        if not solids:
+            logger.warning("GDML received over gRPC has no drawable volumes")
+            return rl4phy_pb2.Reply()
 
-            # Where the next event will land, which is where geometry has to go
-            # for Rerun's latest-at lookup to pair every event with the detector
-            # it was simulated on. Logged even when the bytes were already parsed:
-            # B5/run1.mac ends at the arm angle it started at, and skipping the
-            # log would resolve its last run back to the geometry before it.
-            slot = self._events_seen
-            logger.info(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
-            log_detector(solids, slot)
+        # Where the next event will land, which is where geometry has to go
+        # for Rerun's latest-at lookup to pair every event with the detector
+        # it was simulated on. Logged even when the bytes were already parsed:
+        # B5/run1.mac ends at the arm angle it started at, and skipping the
+        # log would resolve its last run back to the geometry before it.
+        slot = self._events_seen
+        logger.info(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
+        log_detector(solids, slot)
         return rl4phy_pb2.Reply()
-
-
-def watch_and_flush_tracks(servicer: AgentServer) -> None:
-    while True:
-        time.sleep(TRACK_IDLE_FLUSH_S)
-        servicer.flush_quiet_tracks()
 
 
 def start_server():
@@ -427,24 +316,19 @@ def start_server():
     # sends no geometry still gets its tracks drawn the right way up.
     rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
 
-    # max_workers=1: SendDataStream does all its work holding the lock the flusher also
-    # takes, so a second worker would only queue up behind it.
-    servicer = AgentServer()
+    # One worker: the handlers share the slot counter and the writer without a
+    # lock, and geometry has to be drawn before the stream that follows it.
+    servicer = AgentServer(maybe_create_step_writer())
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(servicer, server)
     server.add_insecure_port("0.0.0.0:50051")
     server.start()
     logger.info("Listening on port 50051, waiting for Geant4 data...")
-
-    threading.Thread(
-        target=watch_and_flush_tracks, args=(servicer,), daemon=True
-    ).start()
-
     server.wait_for_termination()
 
 
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stdout)
-    rr.init("rl4phy_muone")
+    rr.init("rl4phy")
     start_server()
