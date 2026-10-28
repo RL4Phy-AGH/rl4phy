@@ -17,7 +17,7 @@ from rerun_view import RerunView
 PAYLOADS = {f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields}
 
 
-class AgentServer(rl4phy_pb2_grpc.SendServiceServicer):
+class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
     def __init__(self, writer: ParquetStepWriter | None, view: RerunView) -> None:
         self.msg = 0
         self._writer = writer
@@ -117,7 +117,9 @@ def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) 
     # One worker: the handlers share the writer and the view without a lock,
     # and geometry has to be drawn before the stream that follows it.
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=1))
-    rl4phy_pb2_grpc.add_SendServiceServicer_to_server(AgentServer(writer, view), server)
+    rl4phy_pb2_grpc.add_SendServiceServicer_to_server(
+        SendServicer(writer, view), server
+    )
     server.add_insecure_port(f"0.0.0.0:{port}")
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: server.stop(grace=5))
