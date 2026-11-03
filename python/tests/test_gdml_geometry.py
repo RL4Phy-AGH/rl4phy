@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from gdml_geometry import PlacedBox, PlacedMesh, parse_gdml_bytes
 
@@ -38,28 +39,40 @@ B1_LIKE = b"""<?xml version="1.0"?>
 """
 
 
-def meshes() -> list[PlacedMesh]:
-    solids = parse_gdml_bytes(B1_LIKE)
-    assert isinstance(solids[0], PlacedBox) and solids[0].is_container
-    found = [s for s in solids if isinstance(s, PlacedMesh)]
-    assert {m.solid_type for m in found} == {"Cons", "Trd"}
-    return found
+@pytest.fixture
+def solids():
+    return parse_gdml_bytes(B1_LIKE)
 
 
-def test_each_face_carries_its_own_normal():
-    for mesh in meshes():
-        corners = mesh.local_vertices_mm.reshape(-1, 3, 3)
-        normals = mesh.vertex_normals.reshape(-1, 3, 3)
-        expected = np.arange(corners.size // 3).reshape(-1, 3)
+@pytest.fixture
+def meshes(solids):
+    return [s for s in solids if isinstance(s, PlacedMesh)]
+
+
+def test_the_world_is_a_cage_and_the_shapes_are_meshes(solids, meshes):
+    assert isinstance(solids[0], PlacedBox)
+    assert solids[0].is_container
+    assert {m.solid_type for m in meshes} == {"Cons", "Trd"}
+
+
+def test_every_corner_is_its_own_vertex(meshes):
+    for mesh in meshes:
+        expected = np.arange(len(mesh.local_vertices_mm)).reshape(-1, 3)
         np.testing.assert_array_equal(mesh.triangles, expected)
+        assert len(mesh.vertex_normals) == len(mesh.local_vertices_mm)
+
+
+def test_each_face_carries_its_own_unit_normal(meshes):
+    for mesh in meshes:
+        normals = mesh.vertex_normals.reshape(-1, 3, 3)
         np.testing.assert_allclose(np.linalg.norm(normals, axis=2), 1.0, atol=1e-5)
         np.testing.assert_array_equal(normals[:, 0], normals[:, 1])
         np.testing.assert_array_equal(normals[:, 0], normals[:, 2])
 
 
-def test_normals_point_out_of_the_solid():
+def test_normals_point_out_of_the_solid(meshes):
     # Both shapes are convex, so every face looks away from the inside.
-    for mesh in meshes():
+    for mesh in meshes:
         corners = mesh.local_vertices_mm.reshape(-1, 3, 3)
         outward = corners.mean(axis=1) - mesh.local_vertices_mm.mean(axis=0)
         facing = np.einsum("ij,ij->i", mesh.vertex_normals[::3], outward)

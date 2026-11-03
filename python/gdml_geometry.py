@@ -41,15 +41,16 @@ from loguru import logger
 
 Vec3 = tuple[float, float, float]
 QuaternionXYZW = tuple[float, float, float, float]
-Mesh = tuple[np.ndarray, np.ndarray, np.ndarray]
+_Mesh = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 # A runaway geometry would otherwise take the server down with it: the walk
 # re-descends every placement, so a logical volume reused deep in the tree
 # multiplies out.
 MAX_SOLIDS = 50_000
 
-# Counted over distinct solids, not placements: copies share their mesh and are
-# told apart by their pose, so repetition is free and only genuine variety costs.
+# Counted as Rerun receives them, three per triangle, and over distinct solids,
+# not placements: copies share their mesh and are told apart by their pose, so
+# repetition is free and only genuine variety costs.
 MAX_MESH_VERTICES = 5_000_000
 
 # pyg4ometry's ReplicaVolume axis ids. Only the Cartesian ones place a daughter
@@ -114,8 +115,9 @@ class _Walk:
     solids: list[PlacedSolid] = field(default_factory=list)
     # Tessellating the same solid once per copy is the difference between a
     # snappy load and a stalled server: B5 has 17 solids and 976 placements.
-    meshes: dict[str, Mesh | None] = field(default_factory=dict)
+    meshes: dict[str, _Mesh | None] = field(default_factory=dict)
     vertices: int = 0
+    dropped: bool = False
 
 
 def _clean(name: str) -> str:
@@ -185,13 +187,12 @@ def _matrix_to_quaternion_xyzw(m: np.ndarray) -> QuaternionXYZW:
 def _face_normals(corners: np.ndarray) -> np.ndarray:
     normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
     length = np.linalg.norm(normals, axis=1, keepdims=True)
-    # A sliver with no area gets a zero normal rather than a NaN.
+    # A degenerate triangle gets a zero normal rather than a NaN.
     normals /= np.where(length == 0.0, 1.0, length)
-    return np.repeat(normals, 3, axis=0)
+    return normals
 
 
-def _tessellate(solid, walk: _Walk) -> Mesh | None:
-    """Local frame vertices, triangles and normals for any solid pyg4ometry can mesh."""
+def _tessellate(solid, walk: _Walk) -> _Mesh | None:
     if solid.name in walk.meshes:
         return walk.meshes[solid.name]
 
@@ -218,13 +219,14 @@ def _tessellate(solid, walk: _Walk) -> Mesh | None:
     positions = corners.reshape(-1, 3)
     if walk.vertices + len(positions) > MAX_MESH_VERTICES:
         walk.meshes[solid.name] = None
+        walk.dropped = True
         return None
     walk.vertices += len(positions)
 
     mesh = (
         positions,
         np.arange(len(positions), dtype=np.uint32).reshape(-1, 3),
-        _face_normals(corners),
+        np.repeat(_face_normals(corners), 3, axis=0),
     )
     walk.meshes[solid.name] = mesh
     return mesh
@@ -423,7 +425,7 @@ def parse_gdml(path: str) -> list[PlacedSolid]:
         logger.warning(
             f"Geometry hit the {MAX_SOLIDS} solid cap; the rest is not shown"
         )
-    if walk.vertices >= MAX_MESH_VERTICES:
+    if walk.dropped:
         logger.warning(
             f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing"
         )
