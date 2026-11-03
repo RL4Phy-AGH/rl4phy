@@ -18,13 +18,39 @@ services:
         touch /data/.ready
         echo "datasets ready"
 
+  # The viewer, built from the same image as the server so its version always
+  # matches the SDK in uv.lock. Open http://localhost:9090 in a browser; the page
+  # connects to port 9876 itself, which is why that port is published too.
+  rerun:
+    build:
+      context: .
+      dockerfile: python/Dockerfile
+    command:
+      - rerun
+      - --serve-web
+      - --bind
+      - 0.0.0.0
+      - --port
+      - "9876"
+      - --web-viewer-port
+      - "9090"
+      - --server-memory-limit
+      - 1GiB
+    ports:
+      - "9090:9090"
+      - "9876:9876"
+    healthcheck:
+      test: ["CMD", "python", "-c", "import socket; socket.create_connection(('127.0.0.1', 9876), 2)"]
+      interval: 2s
+      timeout: 3s
+      retries: 15
+
   python:
     build:
       context: .
       dockerfile: python/Dockerfile
     ports:
       - "50051:50051"
-      - "9876:9876" # rerun --connect rerun+http://127.0.0.1:9876/proxy
     # No shared volume between the two services: geometry arrives over gRPC at
     # the start of every run, straight from tmpfs on the Geant4 side, so neither
     # end has a file to hand over. The one bind mount below is the opt-in
@@ -33,8 +59,12 @@ services:
       # Recording is opt-in and off by default. Set RL4PHY_DATASET_DIR=/datasets
       # on the host to write the parquet files into ./datasets there.
       RL4PHY_DATASET_DIR: ${RL4PHY_DATASET_DIR:-}
+      RL4PHY_RERUN_URL: rerun+http://rerun:9876/proxy
     volumes:
       - ./datasets:/datasets
+    depends_on:
+      rerun:
+        condition: service_healthy
 
   geant:
     build:
