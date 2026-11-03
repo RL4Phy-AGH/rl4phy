@@ -194,8 +194,9 @@ section banners, no restating the line below.
 counter += 1
 
 # ok - the reason is nowhere in the code
-# MUonE marks no end of event, so a quiet stream has to flush on a timer.
-TRACK_IDLE_FLUSH_S = 1.0
+# One row group per flush. At about 40 bytes a row, 1000 rows made a row group
+# every 40 kB, far below what Parquet readers want; 65536 rows is about 3 MB.
+DEFAULT_FLUSH_ROWS = 65536
 ```
 
 Delete commented-out code; git remembers it.
