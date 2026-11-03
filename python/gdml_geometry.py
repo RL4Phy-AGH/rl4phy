@@ -41,6 +41,7 @@ from loguru import logger
 
 Vec3 = tuple[float, float, float]
 QuaternionXYZW = tuple[float, float, float, float]
+Mesh = tuple[np.ndarray, np.ndarray, np.ndarray]
 
 # A runaway geometry would otherwise take the server down with it: the walk
 # re-descends every placement, so a logical volume reused deep in the tree
@@ -96,11 +97,15 @@ class PlacedMesh(PlacedSolid):
 
     The arrays are shared between every copy of the same solid and placed by
     `center_mm` / `quaternion_xyzw`, so a hundred copies cost one mesh and a
-    hundred poses rather than a hundred copies of the geometry.
+    hundred poses rather than a hundred copies of the geometry. Every corner is
+    repeated per triangle and carries the normal of that face: a corner shared
+    between faces could carry only one normal, and the viewer would shade the
+    edge as if it were rounded.
     """
 
     local_vertices_mm: np.ndarray
     triangles: np.ndarray
+    vertex_normals: np.ndarray
     solid_type: str
 
 
@@ -109,9 +114,7 @@ class _Walk:
     solids: list[PlacedSolid] = field(default_factory=list)
     # Tessellating the same solid once per copy is the difference between a
     # snappy load and a stalled server: B5 has 17 solids and 976 placements.
-    meshes: dict[str, tuple[np.ndarray, np.ndarray] | None] = field(
-        default_factory=dict
-    )
+    meshes: dict[str, Mesh | None] = field(default_factory=dict)
     vertices: int = 0
 
 
@@ -179,8 +182,16 @@ def _matrix_to_quaternion_xyzw(m: np.ndarray) -> QuaternionXYZW:
     return (x, y, z, w)
 
 
-def _tessellate(solid, walk: _Walk) -> tuple[np.ndarray, np.ndarray] | None:
-    """Local frame vertices and triangles for any solid pyg4ometry can mesh."""
+def _face_normals(corners: np.ndarray) -> np.ndarray:
+    normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    length = np.linalg.norm(normals, axis=1, keepdims=True)
+    # A sliver with no area gets a zero normal rather than a NaN.
+    normals /= np.where(length == 0.0, 1.0, length)
+    return np.repeat(normals, 3, axis=0)
+
+
+def _tessellate(solid, walk: _Walk) -> Mesh | None:
+    """Local frame vertices, triangles and normals for any solid pyg4ometry can mesh."""
     if solid.name in walk.meshes:
         return walk.meshes[solid.name]
 
@@ -203,14 +214,17 @@ def _tessellate(solid, walk: _Walk) -> tuple[np.ndarray, np.ndarray] | None:
         walk.meshes[solid.name] = None
         return None
 
-    if walk.vertices + len(vertices) > MAX_MESH_VERTICES:
+    corners = np.asarray(vertices, dtype=np.float32)[np.asarray(triangles)]
+    positions = corners.reshape(-1, 3)
+    if walk.vertices + len(positions) > MAX_MESH_VERTICES:
         walk.meshes[solid.name] = None
         return None
-    walk.vertices += len(vertices)
+    walk.vertices += len(positions)
 
     mesh = (
-        np.array(vertices, dtype=np.float32),
-        np.array(triangles, dtype=np.uint32),
+        positions,
+        np.arange(len(positions), dtype=np.uint32).reshape(-1, 3),
+        _face_normals(corners),
     )
     walk.meshes[solid.name] = mesh
     return mesh
@@ -268,12 +282,13 @@ def _make_placed(
     mesh = _tessellate(solid, walk)
     if mesh is None:
         return None
-    local_vertices, triangles = mesh
+    local_vertices, triangles, normals = mesh
 
     return PlacedMesh(
         **common,
         local_vertices_mm=local_vertices,
         triangles=triangles,
+        vertex_normals=normals,
         solid_type=kind,
     )
 

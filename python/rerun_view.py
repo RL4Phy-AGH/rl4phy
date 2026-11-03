@@ -86,6 +86,7 @@ class RerunView:
                     rr.Mesh3D(
                         vertex_positions=template.local_vertices_mm,
                         triangle_indices=template.triangles,
+                        vertex_normals=template.vertex_normals,
                         albedo_factor=[*color, alpha],
                     ),
                     rr.InstancePoses3D(
