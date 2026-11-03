@@ -75,7 +75,6 @@ def main(
 ) -> None:
     b1 = rl4phy_pb2.Data(event_scoring=rl4phy_pb2.EventScoring(edep=0.042, event_id=7))
 
-    # Every calorimeter cell is sent, empty ones included: 80 EM, 20 hadronic.
     em_cal_edep = [0.0] * 80
     em_cal_edep[42:45] = [12.5, 48.0, 21.3]
     had_cal_edep = [0.0] * 20

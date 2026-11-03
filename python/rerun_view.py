@@ -19,8 +19,7 @@ def _path_color(path: str) -> list[int]:
     return [round(r * 255), round(g * 255), round(b * 255)]
 
 
-# Geant4's drawByCharge palette, exactly as G4Colour names it, so a track comes
-# out the same colour here as in the OpenGL window this view is checked against.
+# Geant4's drawByCharge colours, so tracks match the OpenGL window.
 def _charge_color(charge: float) -> list[int]:
     if charge > 0.0:
         return [0, 0, 255]
@@ -34,32 +33,26 @@ class RerunView:
         rr.init("rl4phy")
         rr.connect_grpc(url)
         logger.info(f"Sending to the Rerun viewer at {url}")
-        # A property of the recording, not of any one detector, so a producer that
-        # sends no geometry still gets its tracks drawn the right way up.
+        # Here, not in draw_geometry, so tracks stay upright even when no geometry
+        # arrives.
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
         self._max_labels = max_labels
         self._events_seen = 0
         self._geometry_entities: set[str] = set()
 
-    # The event id cannot be the timeline position: Geant4 restarts it at 0 on
-    # every /run/beamOn and the wire carries no run id, so ids repeat across runs.
-    # This counts forward instead.
+    # Not event_id: Geant4 restarts it at 0 on every /run/beamOn, and nothing
+    # says which run an event came from.
     def _next_slot(self) -> int:
         slot = self._events_seen
         self._events_seen += 1
         return slot
 
     def draw_geometry(self, solids: list[PlacedSolid]) -> None:
-        # Where the next event will land, which is where geometry has to go for
-        # Rerun's latest-at lookup to pair every event with the detector it was
-        # simulated on. Drawn on every arrival, even a repeat: B5/run1.mac ends at
-        # the arm angle it started at, and skipping the repeat would resolve its
-        # last run back to the geometry before it. Events of the previous run
-        # still in flight land after it; the wire carries no run id to tell.
+        # Logged at the next event's index, not static: B5 rebuilds its detector
+        # between runs and each event must show the geometry it ran on. A repeat is
+        # drawn too, since B5/run1.mac ends at the angle it started at.
         slot = self._events_seen
         logger.info(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
-        # On the timeline rather than static, because B5 rebuilds its detector mid
-        # session and scrubbing back must show the geometry of that event's run.
         rr.set_time("event_index", sequence=slot)
 
         groups: dict[tuple[str, str], list[PlacedSolid]] = {}
@@ -67,8 +60,7 @@ class RerunView:
             groups.setdefault((solid.path, type(solid).__name__), []).append(solid)
 
         entities = {f"world/{path}" for path, _ in groups}
-        # Flat rather than recursive: world is an ancestor of every entity here,
-        # so a recursive clear would reach the ones this geometry is about to fill.
+        # A gone path can be the parent of a kept one, so the clear must not recurse.
         for gone in self._geometry_entities - entities:
             rr.log(gone, rr.Clear(recursive=False))
         self._geometry_entities = entities
@@ -79,7 +71,7 @@ class RerunView:
 
             if isinstance(group[0], PlacedMesh):
                 template = group[0]
-                # Meshes have no wireframe mode, so an envelope is made translucent.
+                # Mesh3D has no wireframe mode, so a container is drawn translucent.
                 alpha = 70 if template.is_container else 255
                 rr.log(
                     entity,
@@ -119,7 +111,6 @@ class RerunView:
 
     def draw_trajectories(self, event) -> None:
         tracks = event.trajectories
-        # The wire flattens each polyline into x,y,z triples.
         polylines = [
             np.asarray(t.points, dtype=np.float32).reshape(-1, 3) for t in tracks
         ]
@@ -132,13 +123,10 @@ class RerunView:
         )
         point_colors = np.repeat(colors, [len(p) for p in polylines], axis=0)
 
-        # Named event_index so nobody reads a slider position as a Geant4 event
-        # number; the real id is logged beside the tracks below.
         slot = self._next_slot()
         rr.set_time("event_index", sequence=slot)
 
-        # Both archetypes are logged even for an empty event, since that is what
-        # clears the previous one off the screen.
+        # Logged even for an empty event; that is what clears the previous one.
         rr.log(
             "world/tracks/lines",
             rr.LineStrips3D(

@@ -10,7 +10,7 @@ from parquet_to_csv import main as parquet_to_csv
 from test_client import MASS_MU, STATION_10MM, fake_crossings
 
 # Median of the standard Moyal distribution the generator draws from.
-MOYAL_MEDIAN = 0.7876
+STANDARD_MOYAL_MEDIAN = 0.7876
 
 
 @pytest.fixture
@@ -38,7 +38,10 @@ def test_derived_quantities_match_the_generator(recorded):
 
     loss = energy_loss(table)
     assert np.all(loss > 0.0)
-    assert abs(np.median(loss) - (layer.mpv_mev + MOYAL_MEDIAN * layer.xi_mev)) < 0.03
+    assert (
+        abs(np.median(loss) - (layer.mpv_mev + STANDARD_MOYAL_MEDIAN * layer.xi_mev))
+        < 0.03
+    )
 
     rms = math.sqrt(np.mean(theta(table) ** 2))
     assert abs(rms / (math.sqrt(2.0) * layer.theta0_rad) - 1.0) < 0.1

@@ -73,8 +73,7 @@ class ParquetStepWriter:
         self._files += 1
         name = f"{FILE_PREFIX}-{int(time.time())}-{os.getpid()}-{self._files}.parquet"
         self.path = os.path.join(self._directory, name)
-        # Written under a temporary name and renamed when complete, so a reader
-        # never opens a file without its footer.
+        # .partial until close(), so the reader's glob skips files with no footer yet.
         self._file = pq.ParquetWriter(
             f"{self.path}.partial", STEP_SCHEMA, compression="zstd"
         )

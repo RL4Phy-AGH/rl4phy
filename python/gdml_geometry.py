@@ -1,30 +1,17 @@
-"""Detector geometry read natively with pyg4ometry (architecture decision from
-the 2026-05-28 meeting: Python consumes the exported GDML via pyg4ometry).
+"""Detector geometry read from GDML with pyg4ometry.
 
-The walk is recursive. MUonE places its stations directly in the world, but the
-Geant4 examples nest everything: B5 hides its hodoscopes, drift chambers and
-calorimeter cells two to five levels down inside two arm envelopes, so stopping
-at the world's direct daughters shows the detector as a pair of empty boxes.
+Boxes and plain cylinders stay Rerun primitives because Rerun meshes have no
+wireframe mode: a meshed envelope would hide what is inside it. Everything
+else is tessellated.
 
-Shapes are resolved in one of two ways. Boxes and plain cylinders map exactly
-onto Rerun primitives, which are compact, carry per copy labels and can be drawn
-as wireframe cages; everything else (cones, trapezoids, hollow or wedge tubes,
-boolean solids) is tessellated with pyg4ometry and logged as a mesh, so a new
-example never needs a new branch here. Cages matter: Rerun meshes have no
-wireframe mode, so a meshed envelope would hide everything inside it.
+Easy to get wrong:
 
-Three conventions here are easy to get wrong, and B5 exercises all three:
-
-* GDML stores the rotation of the *mother* frame, not of the solid.
-  G4GDMLReadDefine::GetRotationMatrix composes R = Rz(z) @ Ry(y) @ Rx(x) and
-  G4GDMLReadStructure applies its inverse. B5's second arm is written as
-  y = +30 deg yet has to end up pointing along (-sin 30, 0, cos 30), which comes
-  out right only after the transpose.
-* pyg4ometry evaluates expressions and units for us, but not uniformly: physical
-  volume rotations arrive in radians, while a solid's angular parameters stay in
-  that solid's own aunit.
-* Lengths from the GDML reader are the GDML attributes, i.e. full lengths, where
-  the Geant4 constructors take half lengths.
+* GDML stores the rotation of the mother frame, not of the solid, so the
+  matrix is transposed before use. Check: B5's second arm is written as
+  y = +30 deg and must end up along (-sin 30, 0, cos 30).
+* pyg4ometry returns placement rotations in radians but keeps a solid's
+  angles in the solid's own aunit.
+* GDML lengths are full lengths; Geant4 constructors take half lengths.
 """
 
 from __future__ import annotations
@@ -43,18 +30,15 @@ Vec3 = tuple[float, float, float]
 QuaternionXYZW = tuple[float, float, float, float]
 _Mesh = tuple[np.ndarray, np.ndarray, np.ndarray]
 
-# A runaway geometry would otherwise take the server down with it: the walk
-# re-descends every placement, so a logical volume reused deep in the tree
-# multiplies out.
+# A logical volume reused deep in the tree multiplies out; without a cap it
+# takes the server down.
 MAX_SOLIDS = 50_000
 
-# Counted as Rerun receives them, three per triangle, and over distinct solids,
-# not placements: copies share their mesh and are told apart by their pose, so
-# repetition is free and only genuine variety costs.
+# Counted as Rerun receives them, three per triangle, over distinct solids:
+# copies share one mesh, so repetition is free.
 MAX_MESH_VERTICES = 5_000_000
 
-# pyg4ometry's ReplicaVolume axis ids. Only the Cartesian ones place a daughter
-# by a pure translation, which is all this walk knows how to reproduce.
+# pyg4ometry's axis ids for x, y, z.
 _REPLICA_AXIS_INDEX = {1: 0, 2: 1, 3: 2}
 
 # Geant4 writes the volume pointer into every GDML name.
@@ -63,12 +47,10 @@ _POINTER_SUFFIX = re.compile(r"0x[0-9a-fA-F]+")
 
 @dataclass(frozen=True, kw_only=True)
 class PlacedSolid:
-    """One placement, resolved to world coordinates.
+    """One placement in world coordinates.
 
-    `path` is the chain of volume names from the world down, which the Rerun
-    side turns into an entity path so a whole subdetector can be toggled at
-    once. `is_container` marks a volume that has daughters, i.e. an envelope
-    worth drawing as a cage rather than as a solid block.
+    `path` is the volume chain from the world down; Rerun turns it into an
+    entity path so a whole subdetector can be toggled at once.
     """
 
     path: str
@@ -94,14 +76,9 @@ class PlacedCylinder(PlacedSolid):
 
 @dataclass(frozen=True, kw_only=True)
 class PlacedMesh(PlacedSolid):
-    """Tessellated solid, kept in its own frame.
-
-    The arrays are shared between every copy of the same solid and placed by
-    `center_mm` / `quaternion_xyzw`, so a hundred copies cost one mesh and a
-    hundred poses rather than a hundred copies of the geometry. Every corner is
-    repeated per triangle and carries the normal of that face: a corner shared
-    between faces could carry only one normal, and the viewer would shade the
-    edge as if it were rounded.
+    """Tessellated solid in its own frame; copies share the arrays and differ
+    by pose. Each corner is repeated per triangle with that face's normal, or
+    the viewer would shade shared edges as rounded.
     """
 
     local_vertices_mm: np.ndarray
@@ -115,7 +92,7 @@ class _Walk:
     solids: list[PlacedSolid] = field(default_factory=list)
     # Tessellating the same solid once per copy is the difference between a
     # snappy load and a stalled server: B5 has 17 solids and 976 placements.
-    meshes: dict[str, _Mesh | None] = field(default_factory=dict)
+    mesh_per_solid: dict[str, _Mesh | None] = field(default_factory=dict)
     vertices: int = 0
     dropped: bool = False
 
@@ -141,7 +118,6 @@ def _degrees(value, aunit: str) -> float:
 
 
 def _solid_rotation(angles_rad: np.ndarray) -> np.ndarray:
-    """Rotation of the solid inside its mother, from GDML's three angles."""
     rx, ry, rz = angles_rad
     cx, sx = math.cos(rx), math.sin(rx)
     cy, sy = math.cos(ry), math.sin(ry)
@@ -187,14 +163,13 @@ def _matrix_to_quaternion_xyzw(m: np.ndarray) -> QuaternionXYZW:
 def _face_normals(corners: np.ndarray) -> np.ndarray:
     normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
     length = np.linalg.norm(normals, axis=1, keepdims=True)
-    # A degenerate triangle gets a zero normal rather than a NaN.
     normals /= np.where(length == 0.0, 1.0, length)
     return normals
 
 
 def _tessellate(solid, walk: _Walk) -> _Mesh | None:
-    if solid.name in walk.meshes:
-        return walk.meshes[solid.name]
+    if solid.name in walk.mesh_per_solid:
+        return walk.mesh_per_solid[solid.name]
 
     try:
         vertices, polygons, _ = solid.mesh().toVerticesAndPolygons()
@@ -202,23 +177,22 @@ def _tessellate(solid, walk: _Walk) -> _Mesh | None:
         logger.opt(exception=True).warning(
             f"Could not tessellate {_clean(solid.name)!r}, skipping it"
         )
-        walk.meshes[solid.name] = None
+        walk.mesh_per_solid[solid.name] = None
         return None
 
-    # pyg4ometry hands back triangles already; fan anything wider just in case.
     triangles = []
     for polygon in polygons:
         for i in range(1, len(polygon) - 1):
             triangles.append((polygon[0], polygon[i], polygon[i + 1]))
 
     if not triangles:
-        walk.meshes[solid.name] = None
+        walk.mesh_per_solid[solid.name] = None
         return None
 
     corners = np.asarray(vertices, dtype=np.float32)[np.asarray(triangles)]
     positions = corners.reshape(-1, 3)
     if walk.vertices + len(positions) > MAX_MESH_VERTICES:
-        walk.meshes[solid.name] = None
+        walk.mesh_per_solid[solid.name] = None
         walk.dropped = True
         return None
     walk.vertices += len(positions)
@@ -228,7 +202,7 @@ def _tessellate(solid, walk: _Walk) -> _Mesh | None:
         np.arange(len(positions), dtype=np.uint32).reshape(-1, 3),
         np.repeat(_face_normals(corners), 3, axis=0),
     )
-    walk.meshes[solid.name] = mesh
+    walk.mesh_per_solid[solid.name] = mesh
     return mesh
 
 
@@ -243,7 +217,6 @@ def _make_placed(
     walk: _Walk,
     dimensions=None,
 ) -> PlacedSolid | None:
-    """Turn one resolved placement into whatever Rerun can draw for it."""
     kind = type(solid).__name__
     common = {
         "path": path,
@@ -270,8 +243,7 @@ def _make_placed(
             ),
         )
 
-    # A hollow or wedge tube has no Rerun primitive, so only the plain ones take
-    # this shortcut; the rest fall through to the mesh and stay faithful.
+    # Rerun has no hollow or wedge cylinder, so those go through the mesh.
     if kind == "Tubs":
         sweep = _degrees(param("pDPhi"), getattr(solid, "aunit", "deg"))
         if _scalar(param("pRMin")) == 0.0 and sweep >= 359.999:
@@ -296,12 +268,9 @@ def _make_placed(
 
 
 def _replica_placements(replica) -> list[tuple[int, np.ndarray]]:
-    """Positions of a G4PVReplica's copies.
-
-    pyg4ometry exposes a `transforms` list here too, but it is accumulated
-    across the whole subtree (a 10 copy replica in B5 comes back with 430
-    entries, mixing in its descendants' offsets), so the placements are
-    recomputed from the replication parameters instead.
+    """pyg4ometry's `transforms` on a replica are accumulated over the whole
+    subtree (430 entries for a 10 copy replica in B5), so the copies are
+    recomputed from the replication parameters.
     """
     axis = _REPLICA_AXIS_INDEX.get(replica.axis)
     if axis is None:
@@ -398,9 +367,8 @@ def _descend(
 
 
 def parse_gdml(path: str) -> list[PlacedSolid]:
-    # reduceNISTMaterialsToPredefined: the GDML written by Geant4 carries
-    # temperature/density entries for NIST materials (G4_AIR, G4_Si, ...),
-    # which the reader refuses to re-apply to predefined materials otherwise.
+    # Geant4 writes density and temperature for NIST materials; without this
+    # flag the reader rejects them.
     registry = gdml.Reader(path, reduceNISTMaterialsToPredefined=True).getRegistry()
     world = registry.getWorldVolume()
     world_name = _clean(world.name)

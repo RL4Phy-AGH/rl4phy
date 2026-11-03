@@ -13,16 +13,13 @@ from dataset_writer import ParquetStepWriter, maybe_create_step_writer
 from gdml_geometry import parse_gdml_bytes
 from rerun_view import DEFAULT_VIEWER_URL, RerunView
 
-# Read off the proto rather than listed, so the handler table and its test
-# cannot drift from it.
 PAYLOAD_KINDS = {
     f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields
 }
 
-# Every Geant4 worker thread holds one stream open for the whole job, and the
-# geometry of the next run arrives as a separate call that needs a free worker,
-# or it waits behind the streams until the client gives up on it. Generous,
-# because a worker thread is only created once it is needed.
+# Each Geant4 thread keeps one stream open for the whole job, and the next
+# run's geometry call still needs a free worker. Idle workers cost nothing,
+# so the number is high.
 MAX_GEANT4_THREADS = 63
 
 
@@ -32,8 +29,8 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         self._writer = writer
         self._view = view
         self._open_streams = 0
-        # Taken per message, not per stream, so the geometry call gets in
-        # between the messages of the streams that stay open.
+        # Held per message, not per stream, or SendGeometry would wait for the
+        # whole job.
         self._lock = threading.Lock()
         self._handlers = {
             "event_scoring": self._log_b1_event,
@@ -56,8 +53,7 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         finally:
             with self._lock:
                 self._open_streams -= 1
-                # The streams of a job end together, so the recording ends
-                # with the last of them.
+                # A job's streams end together, so its file closes with the last one.
                 if self._open_streams == 0 and self._writer is not None:
                     self._writer.close()
         return rl4phy_pb2.Reply()
@@ -107,8 +103,7 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
     def _record_crossing(self, hit) -> None:
         if not hit.HasField("exit") or hit.exit.e == 0.0:
-            # A crossing without an exit is not a crossing, and a zeroed exit
-            # would read as the whole beam energy lost.
+            # An exit energy of 0 would be read as the whole beam energy lost.
             logger.warning(
                 f"[{self.msg}] crossing without a usable exit: "
                 f"event={hit.event_id} track={hit.track_id}"
@@ -128,7 +123,6 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
     def _log_b5_event(self, event) -> None:
         chamber_hits = ", ".join(str(n) for n in event.drift_chamber_hits)
-        # An arm the particle missed reports -1 instead of a hit time.
         hodoscope_times = ", ".join(
             "none" if t < 0.0 else f"{t:.2f}" for t in event.hodoscope_time
         )

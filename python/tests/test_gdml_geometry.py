@@ -3,7 +3,6 @@ import pytest
 
 from gdml_geometry import PlacedBox, PlacedMesh, parse_gdml_bytes
 
-# The two B1 shapes, a cone and a trapezoid, in a box of nothing.
 B1_LIKE = b"""<?xml version="1.0"?>
 <gdml>
   <materials>
