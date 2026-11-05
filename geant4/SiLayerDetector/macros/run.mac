@@ -1,0 +1,15 @@
+# Quick functional test: 1800 events, the first 1000 as the reference sample,
+# full step output for the remaining 800.
+# Writes test.pb.
+
+/run/setCut 10 um
+/run/initialize
+/tracking/verbose 0
+
+/gun/particle proton
+/gun/energy 100 MeV
+
+/siplate/output/tag test
+/siplate/output/writeSteps true
+/siplate/output/referenceEvents 1000
+/run/beamOn 1800

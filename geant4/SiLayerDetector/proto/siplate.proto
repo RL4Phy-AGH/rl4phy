@@ -1,0 +1,174 @@
+// Output format of the SiPlate simulation.
+//
+// A run writes <tag>.pb: a stream of Record messages, each preceded by its size
+// as a varint (the protobuf "delimited" format):
+//   Record{header}   RunHeader, once
+//   Record{event}    Event, one per event, ordered by event_id; also written
+//                    for events with no hits, so the event IDs are complete
+//   Record{footer}   RunFooter, once; missing when the run was interrupted
+//
+// The file stores what Geant4 knows directly: 4-momenta, positions, deposits.
+// Derived quantities (kinetic energies, energy loss, angles) are computed by the
+// consumer, see analysis/siplate_io.py.
+//
+// Units: energy and momentum MeV, positions and lengths mm, time ns.
+
+syntax = "proto3";
+
+package siplate;
+
+// Total energy and momentum, MeV. Double: an energy loss is the difference of
+// two ~GeV numbers and scattering angles are ~mrad.
+message LorentzVector {
+  double e = 1;
+  double px = 2;
+  double py = 3;
+  double pz = 4;
+}
+
+// Position, mm.
+message Point {
+  float x = 1;
+  float y = 2;
+  float z = 3;
+}
+
+enum Origin {
+  ORIGIN_UNSPECIFIED = 0;
+  ORIGIN_ENTERED = 1;         // entry is on the layer boundary
+  ORIGIN_CREATED_INSIDE = 2;  // secondary born in the layer: entry = birth point
+}
+
+enum Fate {
+  FATE_UNSPECIFIED = 0;  // still inside at the end of the event (should not happen)
+  FATE_EXITED = 1;       // exit is on the layer boundary
+  FATE_STOPPED = 2;      // came to rest or was killed by an EM process
+  FATE_DESTROYED = 3;    // hadronic interaction, decay or annihilation
+}
+
+// Bits of StepHit.interactions.
+enum Interaction {
+  INTERACTION_NONE = 0;
+  INTERACTION_HADRON_ELASTIC = 1;
+  INTERACTION_HADRON_INELASTIC = 2;
+  INTERACTION_OTHER_HADRONIC = 4;  // capture, charge exchange, ...
+}
+
+// One Geant4 step inside the layer, described by its post-step point. The
+// pre-step point of step k is the post-step point of step k-1, and of the first
+// step it is StepHit.entry / entry_pos, so nothing is stored twice.
+message StepPoint {
+  Point pos = 1;            // post-step position
+  LorentzVector p = 2;      // 4-momentum after the step
+  float edep = 3;           // MeV deposited in this step
+  float edep_nonion = 4;    // MeV, non-ionising part of edep
+  float step_length = 5;    // mm
+  int32 process = 6;        // index into RunHeader.processes, -1: none
+  int32 n_secondaries = 7;  // secondaries created in this step
+}
+
+// One track in one layer, from where it enters (or is created) to where it
+// leaves (or ends). A track that re-enters the layer gives a second hit.
+message StepHit {
+  int32 track_id = 8;
+  // Unique together with Event.run_id: it restarts at 0 on every /run/beamOn.
+  int32 event_id = 9;
+  int32 parent_id = 10;  // 0: primary
+  int32 pdg = 11;
+  string volume = 12;    // physical volume name, as in the GDML
+  LorentzVector entry = 13;
+  LorentzVector exit = 14;  // at the boundary, or where the track ended
+  // mm, summed over the steps inside the layer: longer than the thickness for a
+  // slanted or scattered track.
+  float path_length = 15;
+
+  float edep = 16;           // MeV deposited by this track in the layer
+  Origin origin = 17;
+  Fate fate = 18;
+  uint32 interactions = 19;  // OR of Interaction bits over the steps in the layer
+  Point entry_pos = 20;
+  Point exit_pos = 21;
+  float entry_time = 22;     // ns, global time at the entry point
+
+  // Steps of this track in the layer, in order. Empty when step output is off
+  // for this event (/siplate/output/writeSteps, maxStepEvents).
+  repeated StepPoint steps = 23;
+  // For a track created inside the layer: index (0-based) of the step of the
+  // parent's hit in this layer that produced it; -1 otherwise.
+  int32 creator_step = 24;
+  int32 n_steps = 25;        // steps in the layer, also when steps is empty
+}
+
+message Event {
+  int32 run_id = 1;
+  int32 event_id = 2;
+  repeated StepHit hits = 3;
+}
+
+message Element {
+  string symbol = 1;
+  double z = 2;
+  double a_g_mol = 3;
+  double mass_fraction = 4;
+}
+
+// Sternheimer density-effect parameters (G4IonisParamMat).
+message DensityEffect {
+  double c = 1;
+  double x0 = 2;
+  double x1 = 3;
+  double a = 4;
+  double m = 5;
+  double delta0 = 6;
+}
+
+message Cuts {
+  double gamma = 1;
+  double electron = 2;
+  double positron = 3;
+  double proton = 4;
+}
+
+// A sensitive layer and its material: everything the consumer needs for the
+// theory predictions.
+message Layer {
+  string volume = 1;
+  string material = 2;
+  double thickness_mm = 3;  // along z, the beam axis
+  double size_xy_mm = 4;
+  double z_center_mm = 5;
+  double max_step_mm = 6;   // G4UserLimits in the layer, 0: none
+  double density_g_cm3 = 7;
+  double radiation_length_mm = 8;
+  double mean_excitation_ev = 9;
+  DensityEffect density_effect = 10;
+  repeated Element elements = 11;
+  Cuts cut_range_mm = 12;    // production cuts
+  Cuts cut_energy_mev = 13;  // the same as energy thresholds in this material
+}
+
+message RunHeader {
+  int32 run_id = 1;
+  int64 n_events = 2;          // events requested by /run/beamOn
+  int64 reference_events = 3;  // /siplate/output/referenceEvents
+  string geant4_version = 4;
+  string physics_list = 5;
+  repeated Layer layers = 6;
+  repeated string processes = 7;  // names, referenced by StepPoint.process
+  uint32 schema_version = 8;
+  int32 n_threads = 9;
+  bool write_steps = 10;
+  int64 max_step_events = 11;
+}
+
+message RunFooter {
+  int64 n_events = 1;  // events written
+}
+
+message Record {
+  oneof content {
+    RunHeader header = 1;
+    Event event = 2;
+    RunFooter footer = 3;
+  }
+}
