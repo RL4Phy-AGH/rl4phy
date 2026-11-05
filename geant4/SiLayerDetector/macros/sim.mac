@@ -1,0 +1,38 @@
+# Production run: reference and target samples in one run.
+#
+# 3.6M events with one setup. The analysis splits them by event ID:
+#   events 0 .. 1 999 999         reference sample (2M): smooth reference
+#                                 distributions, incl. the tails of the angular
+#                                 distribution, where Moliere theory departs from
+#                                 a Gaussian at the 1e-4..1e-5 level
+#   events 2 000 000 .. 3 599 999 target sample (1.6M, 80% of the reference):
+#                                 the event-by-event sample compared with the
+#                                 reference distributions
+# Geant4 seeds every event independently, so the two samples are statistically
+# independent. referenceEvents only records the split in the run header; the
+# analysis can override it (--n-reference).
+#
+# Every event is written with its hits (~0.4 kB per event). Steps are stored for
+# the first 50k target events only, enough for the depth profiles; -1 stores
+# steps of every target event (~3 kB per event).
+#
+# Output: siplate.pb (~1.1 GB), see proto/siplate.proto
+
+# Production threshold. 10 um in Si (~32 keV for electrons) keeps delta electrons
+# as explicit tracks, so the energy they carry out of the plate shows up as the
+# difference between primary_eloss and edep_total.
+/run/setCut 10 um
+/run/initialize
+/tracking/verbose 0
+/run/printProgress 200000
+
+/random/setSeeds 1001 2001
+
+/gun/particle proton
+/gun/energy 100 MeV
+
+/siplate/output/tag siplate
+/siplate/output/writeSteps true
+/siplate/output/referenceEvents 2000000
+/siplate/output/maxStepEvents 50000
+/run/beamOn 3600000

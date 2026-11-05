@@ -1,0 +1,10 @@
+build/
+*.gdml
+
+# Simulation output and analysis results, when run outside build/
+*.pb
+*.cache.npz
+*_part*.bin
+plots/
+__pycache__/
+.ruff_cache/
