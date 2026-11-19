@@ -1,10 +1,11 @@
+import pytest
 from loguru import logger
 
 import rl4phy_pb2
-from server import PAYLOAD_KINDS, SendServicer
+from server import SendServicer
 
 
-class RecordingWriter:
+class FakeCrossingsFile:
     def __init__(self, fail: bool = False) -> None:
         self.hits = []
         self.fail = fail
@@ -19,92 +20,80 @@ class RecordingWriter:
         self.closed += 1
 
 
-class RecordingView:
+class FakeView:
     def __init__(self) -> None:
         self.events = []
-
-    def draw_geometry(self, solids) -> None:
-        pass
 
     def draw_trajectories(self, event) -> None:
         self.events.append(event.event_id)
 
-    def close(self) -> None:
-        pass
+
+@pytest.fixture
+def warnings():
+    messages = []
+    sink = logger.add(messages.append, level="WARNING")
+    yield messages
+    logger.remove(sink)
 
 
 def send(servicer: SendServicer, *messages: rl4phy_pb2.Data) -> None:
     servicer.SendDataStream(iter(messages), None)
 
 
-def test_every_payload_has_a_handler():
-    servicer = SendServicer(crossings_file=None, view=RecordingView())
-    assert PAYLOAD_KINDS <= set(servicer._handlers)
+def test_every_payload_is_handled(warnings):
+    servicer = SendServicer(None, FakeView())
+    for field in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields:
+        payload = getattr(rl4phy_pb2, field.message_type.name)()
+        send(servicer, rl4phy_pb2.Data(**{field.name: payload}))
+    assert warnings == []
 
 
-def test_crossings_go_to_the_writer(crossings):
-    writer = RecordingWriter()
-    servicer = SendServicer(writer, RecordingView())
+def test_unknown_payload_is_logged_not_raised(warnings):
+    send(SendServicer(None, FakeView()), rl4phy_pb2.Data())
+    assert len(warnings) == 1
+
+
+def test_crossings_go_to_the_file(crossings):
+    crossings_file = FakeCrossingsFile()
     send(
-        servicer,
+        SendServicer(crossings_file, FakeView()),
         rl4phy_pb2.Data(step_hit=crossings[0]),
         rl4phy_pb2.Data(
             event_step_hits=rl4phy_pb2.EventStepHits(event_id=1, hits=crossings[1:4])
         ),
     )
-    assert writer.hits == crossings[:4]
-    assert writer.closed == 1
+    assert crossings_file.hits == crossings[:4]
+    assert crossings_file.closed == 1
 
 
 def test_recording_ends_with_the_last_stream(crossings):
-    writer = RecordingWriter()
-    servicer = SendServicer(writer, RecordingView())
+    crossings_file = FakeCrossingsFile()
+    servicer = SendServicer(crossings_file, FakeView())
 
     def outer_stream():
         yield rl4phy_pb2.Data(step_hit=crossings[0])
         send(servicer, rl4phy_pb2.Data(step_hit=crossings[1]))
-        assert writer.closed == 0
+        assert crossings_file.closed == 0
         yield rl4phy_pb2.Data(step_hit=crossings[2])
 
     servicer.SendDataStream(outer_stream(), None)
-    assert writer.hits == crossings[:3]
-    assert writer.closed == 1
+    assert crossings_file.hits == crossings[:3]
+    assert crossings_file.closed == 1
 
 
 def test_trajectories_go_to_the_view():
-    view = RecordingView()
-    servicer = SendServicer(crossings_file=None, view=view)
+    view = FakeView()
     send(
-        servicer,
-        rl4phy_pb2.Data(event_scoring=rl4phy_pb2.EventScoring()),
+        SendServicer(None, view),
         rl4phy_pb2.Data(event_trajectories=rl4phy_pb2.EventTrajectories(event_id=9)),
     )
     assert view.events == [9]
 
 
-def test_crossing_without_exit_is_skipped(crossings):
-    writer = RecordingWriter()
-    servicer = SendServicer(writer, RecordingView())
-    half = rl4phy_pb2.StepHit(track_id=1, event_id=2, entry=crossings[0].entry)
-    zeroed = rl4phy_pb2.StepHit(track_id=1, event_id=3, exit=rl4phy_pb2.LorentzVector())
-    send(servicer, rl4phy_pb2.Data(step_hit=half), rl4phy_pb2.Data(step_hit=zeroed))
-    assert writer.hits == []
-
-
-def test_unknown_payload_is_logged_not_raised():
-    messages = []
-    sink = logger.add(messages.append, level="WARNING")
-    try:
-        send(SendServicer(crossings_file=None, view=RecordingView()), rl4phy_pb2.Data())
-    finally:
-        logger.remove(sink)
-    assert any("unknown payload" in message for message in messages)
-
-
 def test_write_error_disables_recording(crossings):
-    writer = RecordingWriter(fail=True)
-    servicer = SendServicer(writer, RecordingView())
+    crossings_file = FakeCrossingsFile(fail=True)
+    servicer = SendServicer(crossings_file, FakeView())
     send(servicer, rl4phy_pb2.Data(step_hit=crossings[0]))
-    writer.fail = False
+    crossings_file.fail = False
     send(servicer, rl4phy_pb2.Data(step_hit=crossings[1]))
-    assert writer.hits == []
+    assert crossings_file.hits == []

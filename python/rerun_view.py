@@ -8,7 +8,6 @@ from loguru import logger
 
 from gdml_geometry import PlacedCylinder, PlacedMesh, PlacedSolid
 
-DEFAULT_VIEWER_URL = "rerun+http://127.0.0.1:9876/proxy"
 FLUSH_TIMEOUT_S = 2
 
 
@@ -27,7 +26,7 @@ def _charge_color(charge: float) -> list[int]:
 
 
 class RerunView:
-    def __init__(self, url: str = DEFAULT_VIEWER_URL, max_labels: int = 0) -> None:
+    def __init__(self, url: str, max_labels: int) -> None:
         rr.init("rl4phy")
         rr.connect_grpc(url)
         logger.info(f"Sending to the Rerun viewer at {url}")
@@ -35,11 +34,6 @@ class RerunView:
         self._max_labels = max_labels
         self._events_seen = 0
         self._geometry_entities: set[str] = set()
-
-    def _next_slot(self) -> int:
-        slot = self._events_seen
-        self._events_seen += 1
-        return slot
 
     def draw_geometry(self, solids: list[PlacedSolid]) -> None:
         slot = self._events_seen
@@ -66,7 +60,6 @@ class RerunView:
                     entity,
                     rr.Mesh3D(
                         vertex_positions=template.local_vertices_mm,
-                        triangle_indices=template.triangles,
                         vertex_normals=template.vertex_normals,
                         albedo_factor=[*color, alpha],
                     ),
@@ -112,7 +105,8 @@ class RerunView:
         )
         point_colors = np.repeat(colors, [len(p) for p in polylines], axis=0)
 
-        slot = self._next_slot()
+        slot = self._events_seen
+        self._events_seen += 1
         rr.set_time("event_index", sequence=slot)
 
         rr.log(

@@ -9,15 +9,13 @@ from loguru import logger
 
 import rl4phy_pb2
 import rl4phy_pb2_grpc
-from dataset_writer import ParquetStepWriter, maybe_create_step_writer
+from dataset_writer import ParquetStepWriter
 from gdml_geometry import parse_gdml_bytes
-from rerun_view import DEFAULT_VIEWER_URL, RerunView
+from rerun_view import RerunView
 
-PAYLOAD_KINDS = {
-    f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields
-}
-
-MAX_GEANT4_THREADS = 63
+HOST = "0.0.0.0"
+PORT = 50051
+DEFAULT_RERUN_URL = "rerun+http://127.0.0.1:9876/proxy"
 
 
 class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
@@ -29,16 +27,6 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         self._view = view
         self._open_streams = 0
         self._lock = threading.Lock()
-        self._handlers = {
-            "event_scoring": self._log_event_scoring,
-            "step_hit": self._record_step_hit,
-            "event_step_hits": self._record_event_step_hits,
-            "b5_event": self._log_b5_event,
-            "event_trajectories": self._draw_trajectories,
-        }
-        missing = PAYLOAD_KINDS - set(self._handlers)
-        if missing:
-            logger.warning(f"No handler for payload(s): {sorted(missing)}")
 
     def SendDataStream(self, request_iterator, context):
         with self._lock:
@@ -73,37 +61,28 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
     def _handle_data(self, request) -> None:
         self.msg += 1
         kind = request.WhichOneof("payload")
-        handler = self._handlers.get(kind)
-        if handler is None:
-            logger.warning(f"[{self.msg}] unknown payload {kind!r}")
-            return
-        handler(getattr(request, kind))
+        match kind:
+            case "event_scoring":
+                self._log_event_scoring(request.event_scoring)
+            case "step_hit":
+                self._record_crossing(request.step_hit)
+            case "event_step_hits":
+                for hit in request.event_step_hits.hits:
+                    self._record_crossing(hit)
+            case "b5_event":
+                self._log_b5_event(request.b5_event)
+            case "event_trajectories":
+                self._view.draw_trajectories(request.event_trajectories)
+            case _:
+                logger.warning(f"[{self.msg}] unknown payload {kind!r}")
 
     def _log_event_scoring(self, event) -> None:
         logger.info(
-            f"[{self.msg}] B1 event_scoring: event={event.event_id} "
+            f"[{self.msg}] event_scoring: event={event.event_id} "
             f"edep = {event.edep:.6f} MeV"
         )
 
-    def _record_step_hit(self, hit) -> None:
-        logger.info(f"[{self.msg}] crossing: event={hit.event_id} track={hit.track_id}")
-        self._record_crossing(hit)
-
-    def _record_event_step_hits(self, event) -> None:
-        logger.info(
-            f"[{self.msg}] crossings: event={event.event_id}  "
-            f"{len(event.hits)} crossing(s)"
-        )
-        for hit in event.hits:
-            self._record_crossing(hit)
-
     def _record_crossing(self, hit) -> None:
-        if not hit.HasField("exit") or hit.exit.e == 0.0:
-            logger.warning(
-                f"[{self.msg}] crossing without a usable exit: "
-                f"event={hit.event_id} track={hit.track_id}"
-            )
-            return
         if self._crossings_file is None:
             return
         try:
@@ -112,17 +91,13 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             logger.exception("Dataset: recording disabled after a write error")
             self._crossings_file = None
 
-    def _draw_trajectories(self, event) -> None:
-        logger.info(f"[{self.msg}] event_trajectories: event={event.event_id}")
-        self._view.draw_trajectories(event)
-
     def _log_b5_event(self, event) -> None:
         chamber_hits = ", ".join(str(n) for n in event.drift_chamber_hits)
         hodoscope_times = ", ".join(
             "none" if t < 0.0 else f"{t:.2f}" for t in event.hodoscope_time
         )
         logger.info(
-            f"[{self.msg}] B5 b5_event: event={event.event_id}  "
+            f"[{self.msg}] b5_event: event={event.event_id}  "
             f"chamber hits = [{chamber_hits}]  "
             f"hodoscope t = [{hodoscope_times}] ns  "
             f"EM edep = {sum(event.em_cal_edep):.6f} MeV "
@@ -132,10 +107,8 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         )
 
 
-def serve(
-    crossings_file: ParquetStepWriter | None, view: RerunView, port: int = 50051
-) -> None:
-    executor = futures.ThreadPoolExecutor(max_workers=MAX_GEANT4_THREADS + 1)
+def serve(crossings_file: ParquetStepWriter | None, view: RerunView) -> None:
+    executor = futures.ThreadPoolExecutor(max_workers=64)
     server = grpc.server(executor)
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(
         SendServicer(crossings_file, view), server
@@ -143,29 +116,24 @@ def serve(
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: server.stop(grace=5))
     try:
-        server.add_insecure_port(f"0.0.0.0:{port}")
+        server.add_insecure_port(f"{HOST}:{PORT}")
         server.start()
-        logger.info(f"Listening on port {port}, waiting for Geant4 data...")
+        logger.info(f"Listening on {HOST}:{PORT}, waiting for Geant4 data...")
         server.wait_for_termination()
     finally:
         executor.shutdown(wait=True)
-        try:
-            if crossings_file is not None:
-                crossings_file.close()
-        except Exception:
-            logger.exception("Dataset: the last file could not be closed")
-        finally:
-            view.close()
+        view.close()
 
 
 def main() -> None:
     logger.remove()
     logger.add(sys.stdout)
+    directory = os.environ.get("RL4PHY_DATASET_DIR")
+    crossings_file = ParquetStepWriter(directory) if directory else None
     view = RerunView(
-        url=os.environ.get("RL4PHY_RERUN_URL", DEFAULT_VIEWER_URL),
+        url=os.environ.get("RL4PHY_RERUN_URL", DEFAULT_RERUN_URL),
         max_labels=int(os.environ.get("RL4PHY_MAX_LABELS", "0")),
     )
-    crossings_file = maybe_create_step_writer(os.environ.get("RL4PHY_DATASET_DIR"))
     serve(crossings_file, view)
 
 

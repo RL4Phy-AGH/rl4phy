@@ -9,7 +9,7 @@ def test_rows_survive_flush_boundaries(tmp_path, crossings):
     writer = ParquetStepWriter(str(tmp_path), flush_rows=7)
     for hit in crossings:
         writer.append_step_hit(hit)
-    assert os.listdir(tmp_path) == [os.path.basename(writer.path) + ".partial"]
+    assert os.listdir(tmp_path) == [f"{os.path.basename(writer.path)}.partial"]
     writer.close()
     assert os.listdir(tmp_path) == [os.path.basename(writer.path)]
 
