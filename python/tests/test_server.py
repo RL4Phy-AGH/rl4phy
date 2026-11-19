@@ -38,7 +38,7 @@ def send(servicer: SendServicer, *messages: rl4phy_pb2.Data) -> None:
 
 
 def test_every_payload_has_a_handler():
-    servicer = SendServicer(writer=None, view=RecordingView())
+    servicer = SendServicer(crossings_file=None, view=RecordingView())
     assert PAYLOAD_KINDS <= set(servicer._handlers)
 
 
@@ -73,7 +73,7 @@ def test_recording_ends_with_the_last_stream(crossings):
 
 def test_trajectories_go_to_the_view():
     view = RecordingView()
-    servicer = SendServicer(writer=None, view=view)
+    servicer = SendServicer(crossings_file=None, view=view)
     send(
         servicer,
         rl4phy_pb2.Data(event_scoring=rl4phy_pb2.EventScoring()),
@@ -95,7 +95,7 @@ def test_unknown_payload_is_logged_not_raised():
     messages = []
     sink = logger.add(messages.append, level="WARNING")
     try:
-        send(SendServicer(writer=None, view=RecordingView()), rl4phy_pb2.Data())
+        send(SendServicer(crossings_file=None, view=RecordingView()), rl4phy_pb2.Data())
     finally:
         logger.remove(sink)
     assert any("unknown payload" in message for message in messages)

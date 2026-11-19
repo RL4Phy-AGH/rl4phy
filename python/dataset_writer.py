@@ -8,7 +8,7 @@ from loguru import logger
 FILE_PREFIX = "crossings"
 DEFAULT_FLUSH_ROWS = 65536
 
-STEP_SCHEMA = pa.schema(
+CROSSING_SCHEMA = pa.schema(
     [
         ("event_id", pa.int32()),
         ("track_id", pa.int32()),
@@ -25,7 +25,7 @@ STEP_SCHEMA = pa.schema(
 )
 
 
-def _step_row(hit) -> tuple:
+def _crossing_row(hit) -> tuple:
     entry, exit_ = hit.entry, hit.exit
     return (
         hit.event_id,
@@ -59,7 +59,7 @@ class ParquetStepWriter:
     def append_step_hit(self, hit) -> None:
         if self._file is None:
             self._open()
-        self._rows.append(_step_row(hit))
+        self._rows.append(_crossing_row(hit))
         if len(self._rows) >= self._flush_rows:
             self.flush()
 
@@ -68,7 +68,7 @@ class ParquetStepWriter:
         name = f"{FILE_PREFIX}-{int(time.time())}-{os.getpid()}-{self._files}.parquet"
         self.path = os.path.join(self._directory, name)
         self._file = pq.ParquetWriter(
-            f"{self.path}.partial", STEP_SCHEMA, compression="zstd"
+            f"{self.path}.partial", CROSSING_SCHEMA, compression="zstd"
         )
         self.rows_written = 0
         logger.info(f"Dataset: recording crossings to {self.path}")
@@ -80,9 +80,9 @@ class ParquetStepWriter:
         batch = pa.record_batch(
             [
                 pa.array(column, type=field.type)
-                for column, field in zip(columns, STEP_SCHEMA, strict=True)
+                for column, field in zip(columns, CROSSING_SCHEMA, strict=True)
             ],
-            schema=STEP_SCHEMA,
+            schema=CROSSING_SCHEMA,
         )
         self._file.write_batch(batch)
         self.rows_written += len(self._rows)

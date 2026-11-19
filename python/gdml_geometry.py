@@ -111,7 +111,7 @@ class _Walk:
     solids: list[PlacedSolid] = field(default_factory=list)
     # Tessellating the same solid once per copy is the difference between a
     # snappy load and a stalled server: B5 has 17 solids and 976 placements.
-    mesh_per_solid: dict[str, _Mesh | None] = field(default_factory=dict)
+    meshes: dict[str, _Mesh | None] = field(default_factory=dict)
     vertices: int = 0
     dropped: bool = False
 
@@ -188,8 +188,8 @@ def _face_normals(corners: np.ndarray) -> np.ndarray:
 
 
 def _tessellate(solid, walk: _Walk) -> _Mesh | None:
-    if solid.name in walk.mesh_per_solid:
-        return walk.mesh_per_solid[solid.name]
+    if solid.name in walk.meshes:
+        return walk.meshes[solid.name]
 
     try:
         vertices, polygons, _ = solid.mesh().toVerticesAndPolygons()
@@ -197,7 +197,7 @@ def _tessellate(solid, walk: _Walk) -> _Mesh | None:
         logger.opt(exception=True).warning(
             f"Could not tessellate {_clean(solid.name)!r}, skipping it"
         )
-        walk.mesh_per_solid[solid.name] = None
+        walk.meshes[solid.name] = None
         return None
 
     # pyg4ometry hands back triangles already; fan anything wider just in case.
@@ -207,13 +207,13 @@ def _tessellate(solid, walk: _Walk) -> _Mesh | None:
             triangles.append((polygon[0], polygon[i], polygon[i + 1]))
 
     if not triangles:
-        walk.mesh_per_solid[solid.name] = None
+        walk.meshes[solid.name] = None
         return None
 
     corners = np.asarray(vertices, dtype=np.float32)[np.asarray(triangles)]
     positions = corners.reshape(-1, 3)
     if walk.vertices + len(positions) > MAX_MESH_VERTICES:
-        walk.mesh_per_solid[solid.name] = None
+        walk.meshes[solid.name] = None
         walk.dropped = True
         return None
     walk.vertices += len(positions)
@@ -223,7 +223,7 @@ def _tessellate(solid, walk: _Walk) -> _Mesh | None:
         np.arange(len(positions), dtype=np.uint32).reshape(-1, 3),
         np.repeat(_face_normals(corners), 3, axis=0),
     )
-    walk.mesh_per_solid[solid.name] = mesh
+    walk.meshes[solid.name] = mesh
     return mesh
 
 

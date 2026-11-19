@@ -21,14 +21,16 @@ MAX_GEANT4_THREADS = 63
 
 
 class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
-    def __init__(self, writer: ParquetStepWriter | None, view: RerunView) -> None:
+    def __init__(
+        self, crossings_file: ParquetStepWriter | None, view: RerunView
+    ) -> None:
         self.msg = 0
-        self._writer = writer
+        self._crossings_file = crossings_file
         self._view = view
         self._open_streams = 0
         self._lock = threading.Lock()
         self._handlers = {
-            "event_scoring": self._log_b1_event,
+            "event_scoring": self._log_event_scoring,
             "step_hit": self._record_step_hit,
             "event_step_hits": self._record_event_step_hits,
             "b5_event": self._log_b5_event,
@@ -48,8 +50,8 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         finally:
             with self._lock:
                 self._open_streams -= 1
-                if self._open_streams == 0 and self._writer is not None:
-                    self._writer.close()
+                if self._open_streams == 0 and self._crossings_file is not None:
+                    self._crossings_file.close()
         return rl4phy_pb2.Reply()
 
     def SendGeometry(self, request, context):
@@ -77,7 +79,7 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
             return
         handler(getattr(request, kind))
 
-    def _log_b1_event(self, event) -> None:
+    def _log_event_scoring(self, event) -> None:
         logger.info(
             f"[{self.msg}] B1 event_scoring: event={event.event_id} "
             f"edep = {event.edep:.6f} MeV"
@@ -102,13 +104,13 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
                 f"event={hit.event_id} track={hit.track_id}"
             )
             return
-        if self._writer is None:
+        if self._crossings_file is None:
             return
         try:
-            self._writer.append_step_hit(hit)
+            self._crossings_file.append_step_hit(hit)
         except Exception:
             logger.exception("Dataset: recording disabled after a write error")
-            self._writer = None
+            self._crossings_file = None
 
     def _draw_trajectories(self, event) -> None:
         logger.info(f"[{self.msg}] event_trajectories: event={event.event_id}")
@@ -130,11 +132,13 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         )
 
 
-def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) -> None:
+def serve(
+    crossings_file: ParquetStepWriter | None, view: RerunView, port: int = 50051
+) -> None:
     executor = futures.ThreadPoolExecutor(max_workers=MAX_GEANT4_THREADS + 1)
     server = grpc.server(executor)
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(
-        SendServicer(writer, view), server
+        SendServicer(crossings_file, view), server
     )
     for sig in (signal.SIGTERM, signal.SIGINT):
         signal.signal(sig, lambda *_: server.stop(grace=5))
@@ -146,8 +150,8 @@ def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) 
     finally:
         executor.shutdown(wait=True)
         try:
-            if writer is not None:
-                writer.close()
+            if crossings_file is not None:
+                crossings_file.close()
         except Exception:
             logger.exception("Dataset: the last file could not be closed")
         finally:
@@ -161,8 +165,8 @@ def main() -> None:
         url=os.environ.get("RL4PHY_RERUN_URL", DEFAULT_VIEWER_URL),
         max_labels=int(os.environ.get("RL4PHY_MAX_LABELS", "0")),
     )
-    writer = maybe_create_step_writer(os.environ.get("RL4PHY_DATASET_DIR"))
-    serve(writer, view)
+    crossings_file = maybe_create_step_writer(os.environ.get("RL4PHY_DATASET_DIR"))
+    serve(crossings_file, view)
 
 
 if __name__ == "__main__":

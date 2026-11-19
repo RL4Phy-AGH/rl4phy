@@ -4,7 +4,7 @@ import os
 import numpy as np
 import pytest
 
-from dataset_reader import energy_loss, mass, read_crossings, theta, theta_xy
+from crossings import energy_loss, mass, read_crossings, theta, theta_xy
 from dataset_writer import ParquetStepWriter
 from parquet_to_csv import main as parquet_to_csv
 from test_client import MASS_MU, STATION_10MM, fake_crossings

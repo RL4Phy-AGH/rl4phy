@@ -2,7 +2,7 @@ import os
 
 import pyarrow.parquet as pq
 
-from dataset_writer import STEP_SCHEMA, ParquetStepWriter
+from dataset_writer import CROSSING_SCHEMA, ParquetStepWriter
 
 
 def test_rows_survive_flush_boundaries(tmp_path, crossings):
@@ -14,7 +14,7 @@ def test_rows_survive_flush_boundaries(tmp_path, crossings):
     assert os.listdir(tmp_path) == [os.path.basename(writer.path)]
 
     table = pq.read_table(writer.path)
-    assert table.schema.equals(STEP_SCHEMA)
+    assert table.schema.equals(CROSSING_SCHEMA)
     assert table.num_rows == len(crossings) == writer.rows_written
     assert table.to_pylist() == [
         {

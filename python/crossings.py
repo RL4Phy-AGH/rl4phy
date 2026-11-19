@@ -9,7 +9,7 @@ import pyarrow.csv as pa_csv
 import pyarrow.parquet as pq
 from loguru import logger
 
-from dataset_writer import FILE_PREFIX, STEP_SCHEMA
+from dataset_writer import CROSSING_SCHEMA, FILE_PREFIX
 
 
 def crossing_files(source: str) -> list[str]:
@@ -22,15 +22,17 @@ def crossing_files(source: str) -> list[str]:
     return sorted(paths)
 
 
-def read_file(path: str) -> pa.Table:
+def read_crossing_file(path: str) -> pa.Table:
     if os.path.splitext(path)[1].lower() == ".csv":
-        options = pa_csv.ConvertOptions(column_types=STEP_SCHEMA)
+        options = pa_csv.ConvertOptions(column_types=CROSSING_SCHEMA)
         return pa_csv.read_csv(path, convert_options=options)
-    return pq.read_table(path, schema=STEP_SCHEMA)
+    return pq.read_table(path, schema=CROSSING_SCHEMA)
 
 
 def read_crossings(source: str) -> pa.Table:
-    return pa.concat_tables([read_file(path) for path in crossing_files(source)])
+    return pa.concat_tables(
+        [read_crossing_file(path) for path in crossing_files(source)]
+    )
 
 
 def _momentum(table: pa.Table, point: str) -> np.ndarray:
