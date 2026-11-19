@@ -6,8 +6,6 @@ import pyarrow.parquet as pq
 from loguru import logger
 
 FILE_PREFIX = "crossings"
-# One row group per flush. At about 40 bytes a row, 1000 rows made a row group
-# every 40 kB, far below what Parquet readers want; 65536 rows is about 3 MB.
 DEFAULT_FLUSH_ROWS = 65536
 
 STEP_SCHEMA = pa.schema(
@@ -17,8 +15,6 @@ STEP_SCHEMA = pa.schema(
         ("parent_id", pa.int32()),
         ("pdg", pa.int32()),
         ("volume", pa.string()),
-        # float64 and not float32: one float32 step at 160 GeV is 15.6 keV, which
-        # would quantise an 84 keV Landau peak.
         *[
             (f"{point}_{axis}", pa.float64())
             for point in ("entry", "exit")
@@ -49,8 +45,6 @@ def _step_row(hit) -> tuple:
     )
 
 
-# Opened by the first crossing, not in __init__, so a run that records nothing
-# leaves no file behind.
 class ParquetStepWriter:
     def __init__(self, directory: str, flush_rows: int = DEFAULT_FLUSH_ROWS) -> None:
         os.makedirs(directory, exist_ok=True)
@@ -73,7 +67,6 @@ class ParquetStepWriter:
         self._files += 1
         name = f"{FILE_PREFIX}-{int(time.time())}-{os.getpid()}-{self._files}.parquet"
         self.path = os.path.join(self._directory, name)
-        # .partial until close(), so the reader's glob skips files with no footer yet.
         self._file = pq.ParquetWriter(
             f"{self.path}.partial", STEP_SCHEMA, compression="zstd"
         )

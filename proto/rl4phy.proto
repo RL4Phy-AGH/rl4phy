@@ -9,8 +9,7 @@ message EventScoring
     int32 event_id = 2;
 }
 
-// Total energy and momentum of one particle, MeV. Named after G4LorentzVector,
-// which is what the Geant4 side reads it from.
+// Total energy and momentum of one particle, MeV.
 message LorentzVector
 {
     double e = 1;
@@ -19,17 +18,10 @@ message LorentzVector
     double pz = 4;
 }
 
-// One particle crossing one layer: the four-momentum where it entered and
-// where it left, so energy loss and scattering angle come from one message
-// and nothing has to be paired on the receiving side. entry.e - exit.e is
-// the energy the particle lost, including what its secondaries carried away;
-// it is not the energy deposited in the layer. Primaries only for now; a
-// particle that stops inside the layer sends nothing.
+// One particle crossing one volume.
 message StepHit
 {
-    // Fields 1 to 7 are the old per-step point. Nothing sends them, but
-    // commons/GrpcClient.hh still compiles against them, so they stay until the
-    // Geant4 side switches to the fields below.
+    // Fields 1 to 7 are the old per-step point; commons/GrpcClient.hh still sets them.
     float x = 1;
     float y = 2;
     float z = 3;
@@ -38,23 +30,17 @@ message StepHit
     float pz = 6;
     float e_kin = 7;
     int32 track_id = 8;
-    // Not a unique key: it restarts at 0 on every /run/beamOn.
     int32 event_id = 9;
     int32 parent_id = 10;
     int32 pdg = 11;
-    string volume = 12;  // physical volume name, as in the GDML
+    string volume = 12;  // physical volume name
     LorentzVector entry = 13;
     LorentzVector exit = 14;
-    // mm, summed over the steps inside the layer: longer than the thickness
-    // for a slanted or scattered track.
-    float path_length = 15;
+    float path_length = 15;  // mm
 }
 
-// Every crossing of one event, sent once its stepping is over: the same hook
-// and the same stream as EventTrajectories, one message per event.
 message EventStepHits
 {
-    // Same warning as StepHit.event_id: it restarts at 0 on every /run/beamOn.
     int32 event_id = 1;
     repeated StepHit hits = 2;
 }

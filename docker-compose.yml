@@ -18,9 +18,6 @@ services:
         touch /data/.ready
         echo "datasets ready"
 
-  # The viewer, built from the same image as the server so its version always
-  # matches the SDK in uv.lock. Open http://localhost:9090 in a browser; the page
-  # connects to port 9876 itself, which is why that port is published too.
   rerun:
     build:
       context: .

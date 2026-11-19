@@ -21,9 +21,6 @@ class Layer(NamedTuple):
     theta0_rad: float
 
 
-# A 160 GeV muon: most probable Landau loss and width, Highland angle, in the
-# 10 mm silicon station of the MUonE test geometry and in the 300 um plane of
-# the one-plane case.
 STATION_10MM = Layer("Station1", 10.0, 3.43, 0.178, 2.54e-5)
 PLANE_300UM = Layer("Plane", 0.3, 0.0842, 0.00535, 3.76e-6)
 LAYERS = {"station": STATION_10MM, "plane": PLANE_300UM}
@@ -40,8 +37,6 @@ def fake_crossings(
     p_in = math.sqrt(e_in**2 - MASS_MU**2)
     hits = []
     for event_id in range(events):
-        # -ln(Z^2) of a standard normal Z is Moyal distributed: a Landau look-alike
-        # with its most probable value at 0.
         loss = layer.mpv_mev + layer.xi_mev * -math.log(rng.gauss(0.0, 1.0) ** 2)
         e_out = e_in - loss
         p_out = math.sqrt(e_out**2 - MASS_MU**2)

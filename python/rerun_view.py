@@ -13,13 +13,11 @@ FLUSH_TIMEOUT_S = 2
 
 
 def _path_color(path: str) -> list[int]:
-    # Stable across runs, unlike hash(), so a subdetector keeps its colour.
     hue = (zlib.crc32(path.encode()) % 997) / 997.0
     r, g, b = colorsys.hsv_to_rgb(hue, 0.55, 0.95)
     return [round(r * 255), round(g * 255), round(b * 255)]
 
 
-# Geant4's drawByCharge colours, so tracks match the OpenGL window.
 def _charge_color(charge: float) -> list[int]:
     if charge > 0.0:
         return [0, 0, 255]
@@ -33,24 +31,17 @@ class RerunView:
         rr.init("rl4phy")
         rr.connect_grpc(url)
         logger.info(f"Sending to the Rerun viewer at {url}")
-        # Here, not in draw_geometry, so tracks stay upright even when no geometry
-        # arrives.
         rr.log("world", rr.ViewCoordinates.RIGHT_HAND_Y_UP, static=True)
         self._max_labels = max_labels
         self._events_seen = 0
         self._geometry_entities: set[str] = set()
 
-    # Not event_id: Geant4 restarts it at 0 on every /run/beamOn, and nothing
-    # says which run an event came from.
     def _next_slot(self) -> int:
         slot = self._events_seen
         self._events_seen += 1
         return slot
 
     def draw_geometry(self, solids: list[PlacedSolid]) -> None:
-        # Logged at the next event's index, not static: B5 rebuilds its detector
-        # between runs and each event must show the geometry it ran on. A repeat is
-        # drawn too, since B5/run1.mac ends at the angle it started at.
         slot = self._events_seen
         logger.info(f"Loaded {len(solids)} volume(s) from gRPC GDML (index {slot})")
         rr.set_time("event_index", sequence=slot)
@@ -60,7 +51,6 @@ class RerunView:
             groups.setdefault((solid.path, type(solid).__name__), []).append(solid)
 
         entities = {f"world/{path}" for path, _ in groups}
-        # A gone path can be the parent of a kept one, so the clear must not recurse.
         for gone in self._geometry_entities - entities:
             rr.log(gone, rr.Clear(recursive=False))
         self._geometry_entities = entities
@@ -71,7 +61,6 @@ class RerunView:
 
             if isinstance(group[0], PlacedMesh):
                 template = group[0]
-                # Mesh3D has no wireframe mode, so a container is drawn translucent.
                 alpha = 70 if template.is_container else 255
                 rr.log(
                     entity,
@@ -126,7 +115,6 @@ class RerunView:
         slot = self._next_slot()
         rr.set_time("event_index", sequence=slot)
 
-        # Logged even for an empty event; that is what clears the previous one.
         rr.log(
             "world/tracks/lines",
             rr.LineStrips3D(

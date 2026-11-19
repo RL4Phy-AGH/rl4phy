@@ -49,8 +49,6 @@ def mass(table: pa.Table) -> np.ndarray:
     return np.sqrt(np.maximum(e**2 - np.sum(p**2, axis=1), 0.0))
 
 
-# atan2 of the cross and dot products rather than acos of the cosine: at
-# 160 GeV the angles are 1e-5 rad, where acos bottoms out at 1.5e-8 rad.
 def theta(table: pa.Table) -> np.ndarray:
     p_in, p_out = _momentum(table, "entry"), _momentum(table, "exit")
     cross = np.linalg.norm(np.cross(p_in, p_out), axis=1)
@@ -61,7 +59,6 @@ def theta(table: pa.Table) -> np.ndarray:
 def theta_xy(table: pa.Table) -> tuple[np.ndarray, np.ndarray]:
     p_in, p_out = _momentum(table, "entry"), _momentum(table, "exit")
     u = p_in / np.linalg.norm(p_in, axis=1, keepdims=True)
-    # For a beam along z the two angles are the detector x and y projections.
     seed = np.where(np.abs(u[:, :1]) < 0.9, [[1.0, 0.0, 0.0]], [[0.0, 1.0, 0.0]])
     e1 = seed - np.sum(seed * u, axis=1, keepdims=True) * u
     e1 /= np.linalg.norm(e1, axis=1, keepdims=True)

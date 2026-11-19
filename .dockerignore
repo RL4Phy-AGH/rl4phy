@@ -12,9 +12,6 @@ geant4/**/build/
 **/.venv/
 **/.ruff_cache/
 
-# generated on the host or by an earlier build; the image generates its own
 python/rl4phy_pb2*.py
 **/__pycache__/
-
-# recordings are run outputs, and both images build from the repository root
 datasets/

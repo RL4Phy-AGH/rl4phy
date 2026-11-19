@@ -17,9 +17,6 @@ PAYLOAD_KINDS = {
     f.name for f in rl4phy_pb2.Data.DESCRIPTOR.oneofs_by_name["payload"].fields
 }
 
-# Each Geant4 thread keeps one stream open for the whole job, and the next
-# run's geometry call still needs a free worker. Idle workers cost nothing,
-# so the number is high.
 MAX_GEANT4_THREADS = 63
 
 
@@ -29,8 +26,6 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         self._writer = writer
         self._view = view
         self._open_streams = 0
-        # Held per message, not per stream, or SendGeometry would wait for the
-        # whole job.
         self._lock = threading.Lock()
         self._handlers = {
             "event_scoring": self._log_b1_event,
@@ -53,7 +48,6 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
         finally:
             with self._lock:
                 self._open_streams -= 1
-                # A job's streams end together, so its file closes with the last one.
                 if self._open_streams == 0 and self._writer is not None:
                     self._writer.close()
         return rl4phy_pb2.Reply()
@@ -103,7 +97,6 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
     def _record_crossing(self, hit) -> None:
         if not hit.HasField("exit") or hit.exit.e == 0.0:
-            # An exit energy of 0 would be read as the whole beam energy lost.
             logger.warning(
                 f"[{self.msg}] crossing without a usable exit: "
                 f"event={hit.event_id} track={hit.track_id}"
@@ -151,8 +144,6 @@ def serve(writer: ParquetStepWriter | None, view: RerunView, port: int = 50051) 
         logger.info(f"Listening on port {port}, waiting for Geant4 data...")
         server.wait_for_termination()
     finally:
-        # A handler can still be mid-message when the grace period cuts the
-        # stream; let it finish before the writer and the view go away.
         executor.shutdown(wait=True)
         try:
             if writer is not None:

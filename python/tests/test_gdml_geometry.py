@@ -70,7 +70,6 @@ def test_each_face_carries_its_own_unit_normal(meshes):
 
 
 def test_normals_point_out_of_the_solid(meshes):
-    # Both shapes are convex, so every face looks away from the inside.
     for mesh in meshes:
         corners = mesh.local_vertices_mm.reshape(-1, 3, 3)
         outward = corners.mean(axis=1) - mesh.local_vertices_mm.mean(axis=0)
