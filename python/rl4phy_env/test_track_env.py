@@ -21,8 +21,8 @@ from rl4phy_env import ENV_ID
 from rl4phy_env.track_env import OBSERVATION_COLUMNS, TrackPredictionEnv, load_tracks
 
 pytest.skip(
-    "rl4phy_env reads the columns from before #45 (x..e_kin, row_index); "
-    "it is rebuilt as a crossing environment under #33",
+    "rl4phy_env does not read recordings made by the current server; "
+    "it will be rebuilt under #33",
     allow_module_level=True,
 )
 

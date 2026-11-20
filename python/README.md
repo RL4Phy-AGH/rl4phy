@@ -5,18 +5,6 @@ crossings to Parquet and draws geometry and trajectories in Rerun. Dependencies
 are managed with [uv](https://docs.astral.sh/uv/); `uv.lock` is the source of
 truth and the Docker image installs from it, so keep it committed.
 
-| File | Role |
-|---|---|
-| `server.py` | entry point: reads the environment, one handler per payload of `proto/rl4phy.proto` |
-| `rerun_view.py` | everything that talks to Rerun: the connection, geometry, trajectories |
-| `gdml_geometry.py` | turns the GDML sent at the start of a run into drawable solids |
-| `dataset_writer.py` | records `StepHit` crossings, one Parquet file per Geant4 job |
-| `dataset_reader.py` | reads recordings back, Parquet or CSV, and derives energy loss, scattering angle and mass |
-| `parquet_to_csv.py` | exports a recording to CSV (#38) |
-| `test_client.py` | sends fake data, including generated crossings, to a running server |
-| `tests/` | the pytest suite |
-| `rl4phy_env/` | the Gymnasium environment from #31; it still reads the columns from before #45 |
-
 ## Setup
 
 ```sh
@@ -48,71 +36,25 @@ uv add --dev ruff       # dev-only tools
 
 ## Running
 
-```sh
-uv run python -m rerun   # the viewer, listening on port 9876
-uv run server.py         # the server, in another terminal
-```
+`docker compose up --build` from the repository root starts the Rerun viewer,
+the server and Geant4. Open the viewer at
+http://localhost:9090?url=rerun%2Bhttp%3A%2F%2Flocalhost%3A9876%2Fproxy.
 
-The server sends its drawing to a Rerun viewer, by default the one on this
-machine; without one it waits a few seconds at start-up and at shutdown. Under
-docker compose (from the repository root, `docker compose up --build`) the
-viewer is its own service and runs in the browser at http://localhost:9090.
-`RERUN=off` in the server's environment turns drawing off.
-
-| Variable | Meaning |
-|---|---|
-| `RL4PHY_DATASET_DIR` | directory for the Parquet recordings; unset means nothing is recorded |
-| `RL4PHY_RERUN_URL` | where the Rerun viewer listens (default `rerun+http://127.0.0.1:9876/proxy`); compose points it at the `rerun` service |
-| `RL4PHY_MAX_LABELS` | draw labels when an event or a geometry group has at most this many items (default 0) |
-
-## Recording crossings
-
-With `RL4PHY_DATASET_DIR` set the server writes one file per Geant4 job as
-`crossings-<time>-<pid>-<n>.parquet`: it opens with the first crossing and
-closes when the last of the job's streams ends (a job opens one per worker
-thread). The file is written under a `.partial` name and renamed when complete,
-so an unfinished one is never read by mistake. Each row is one
-`StepHit`: `event_id`, `track_id`, `parent_id`, `pdg`, `volume`, the
-four-momentum at entry and exit (`entry_e`, `entry_px`, `entry_py`, `entry_pz`
-and the same for `exit`; MeV, doubles) and `path_length` in mm.
-
-Today the only sender of crossings is `test_client.py`; the Geant4 side starts
-sending them under #45, so a compose run with `RL4PHY_DATASET_DIR` set records
-nothing yet.
+Nothing is recorded unless `RL4PHY_DATASET_DIR` is set. The Geant4 side does
+not send crossings yet (#45), so for now they come from `test_client.py`:
 
 ```sh
-uv run dataset_reader.py ../datasets     # a directory, a file or a glob; prints a summary
-uv run parquet_to_csv.py ../datasets     # a .csv next to each file
+RL4PHY_DATASET_DIR=/datasets docker compose up --build rerun python
+uv run test_client.py                  # in another terminal, from python/
+uv run crossings.py ../datasets        # summary of the recording
+uv run parquet_to_csv.py ../datasets   # a .csv next to each .parquet
 ```
-
-`dataset_reader.read_crossings` takes a directory (its `crossings-*.parquet`
-files), a file or a glob, reads Parquet or a `.csv` written by
-`parquet_to_csv.py`, and returns a pyarrow table; `energy_loss`, `theta`,
-`theta_xy` and `mass` derive the physics from it. The energy loss is what the
-particle lost, including what its secondaries carried away, not what the layer
-absorbed.
-
-## Trying it without Geant4
-
-```sh
-RL4PHY_DATASET_DIR=/tmp/crossings uv run server.py   # terminal A, with the viewer up or RERUN=off
-uv run test_client.py 10000                           # terminal B: 10000 fake crossings
-uv run test_client.py 1000 plane                      # the 300 um plane instead of the 10 mm station
-```
-
-`test_client.py` draws the energy loss of a 160 GeV muon from a Moyal
-distribution and the scattering angles from the Highland formula, so a
-recording of it has the right medians and widths to check the reader against.
 
 ## Tests
 
 ```sh
 uv run pytest
 ```
-
-The tests build messages from the generated stubs, so generate them first (see
-Setup). The `rl4phy_env` tests are skipped until the environment is rebuilt
-under #33.
 
 ## Formatting and linting
 
@@ -146,8 +88,8 @@ logger.info("server started")
 
 Pick a level that matches the message: `debug`, `info`, `warning`, `error`.
 
-Entry points (`server.py`, `test_client.py`, `dataset_reader.py`,
-`parquet_to_csv.py`) send the log to stdout; loguru's default would be stderr.
+Entry points (`server.py`, `test_client.py`) send the log to stdout; loguru's
+default would be stderr.
 
 ### Imports at the top
 
@@ -194,9 +136,8 @@ section banners, no restating the line below.
 counter += 1
 
 # ok - the reason is nowhere in the code
-# One row group per flush. At about 40 bytes a row, 1000 rows made a row group
-# every 40 kB, far below what Parquet readers want; 65536 rows is about 3 MB.
-DEFAULT_FLUSH_ROWS = 65536
+# MUonE marks no end of event, so a quiet stream has to flush on a timer.
+TRACK_IDLE_FLUSH_S = 1.0
 ```
 
 Delete commented-out code; git remembers it.

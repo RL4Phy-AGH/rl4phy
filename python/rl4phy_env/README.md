@@ -1,5 +1,8 @@
 # rl4phy_env
 
+This environment does not read recordings made by the current server: the
+columns changed with #45. It will be rebuilt on crossings under #33.
+
 Gymnasium environment over recorded Geant4 step data (issue #27, v0). It replays
 the parquet files written by `python/dataset_writer.py`; driving Geant4 live
 needs a two-way gRPC link that does not exist yet, and the interface will not
@@ -61,8 +64,6 @@ observation, reward, terminated, truncated, info = env.step([0.0, 0.0, 0.0])
 
 ## Known limitations
 
-- Reads the columns from before #45 (`x..e_kin`, `row_index`), which the
-  writer no longer produces; it is rebuilt as a crossing environment under #33.
 - Steps are only produced inside the `Station` volumes, so a trajectory is a
   sequence of tracker hits, not a continuous path.
 - The reward ignores momentum and energy.
