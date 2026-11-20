@@ -1,7 +1,7 @@
 # rl4phy_env
 
 This environment does not read recordings made by the current server: the
-columns changed with #45. It will be rebuilt on crossings under #33.
+columns changed with #45. It will be rebuilt under #33.
 
 Gymnasium environment over recorded Geant4 step data (issue #27, v0). It replays
 the parquet files written by `python/dataset_writer.py`; driving Geant4 live

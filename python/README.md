@@ -45,9 +45,9 @@ not send crossings yet (#45), so for now they come from `test_client.py`:
 
 ```sh
 RL4PHY_DATASET_DIR=/datasets docker compose up --build rerun python
-uv run test_client.py                  # in another terminal, from python/
-uv run crossings.py ../datasets        # summary of the recording
-uv run parquet_to_csv.py ../datasets   # a .csv next to each .parquet
+docker compose exec python python test_client.py   # in another terminal
+docker compose exec python python crossings.py /datasets
+docker compose exec python python parquet_to_csv.py /datasets
 ```
 
 ## Tests
@@ -88,8 +88,7 @@ logger.info("server started")
 
 Pick a level that matches the message: `debug`, `info`, `warning`, `error`.
 
-Entry points (`server.py`, `test_client.py`) send the log to stdout; loguru's
-default would be stderr.
+Entry points send the log to stdout; loguru's default would be stderr.
 
 ### Imports at the top
 
