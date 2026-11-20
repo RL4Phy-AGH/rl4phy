@@ -116,7 +116,7 @@ inline G4double InitialKineticEnergy(const G4VTrajectory& trajectory)
 // carries none of the former (G4VTrajectoryPoint::GetAuxiliaryPoints() returns
 // nullptr), so this is the plain polyline there and the smoothed one for
 // G4SmoothTrajectory, without either case being special.
-inline void AppendPoints(const G4VTrajectory& trajectory, rl4phys::Trajectory& out)
+inline void AppendPoints(const G4VTrajectory& trajectory, rl4phy::Trajectory& out)
 {
   for (G4int i = 0; i < trajectory.GetPointEntries(); ++i) {
     const G4VTrajectoryPoint* point = trajectory.GetPoint(i);
@@ -158,7 +158,7 @@ inline std::size_t SendEvent(GrpcClient& client, const G4Event* event,
   // honest to send.
   if (event == nullptr) return 0;
 
-  rl4phys::EventTrajectories message;
+  rl4phy::EventTrajectories message;
   message.set_event_id(event->GetEventID());
 
   // Null whenever the event stored nothing at all; the loop is then skipped

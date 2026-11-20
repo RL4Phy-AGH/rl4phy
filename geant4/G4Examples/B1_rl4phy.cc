@@ -60,8 +60,8 @@ class GrpcEventAction : public EventAction
     {
       EventAction::EndOfEventAction(event);
 
-      fClient.SendEventScoring(static_cast<float>(fGrpcEdep / MeV),
-                               event->GetEventID());
+      fClient.SendB1Event(static_cast<float>(fGrpcEdep / MeV),
+                          event->GetEventID());
     }
 
   private:

@@ -7,14 +7,14 @@
 # expects, next to the calling CMakeLists.txt:
 #
 #   <Name>/           the example as Geant4 ships it, untouched (src/, include/, macros)
-#   <Name>_rl4phys.cc our entry point, built against <Name>/include and
+#   <Name>_rl4phy.cc our entry point, built against <Name>/include and
 #                     geant4/commons
 #
-# and produces the executable <Name>_rl4phys with the example's macros copied
+# and produces the executable <Name>_rl4phy with the example's macros copied
 # to <build>/<Name>/ so it can be run straight from the build directory.
 #
-# For example, rl4phy_add_example(B5) takes B5/ and B5_rl4phys.cc, builds
-# B5_rl4phys and copies B5/run1.mac and friends to <build>/B5/.
+# For example, rl4phy_add_example(B5) takes B5/ and B5_rl4phy.cc, builds
+# B5_rl4phy and copies B5/run1.mac and friends to <build>/B5/.
 #
 # Headers are added per target, never globally: B1 and B5 both ship a
 # DetectorConstruction.hh, EventAction.hh, RunAction.hh, ActionInitialization.hh
@@ -34,7 +34,7 @@ set(RL4PHY_COMMONS_DIR "${_rl4phy_commons}" CACHE INTERNAL "RL4PHYS shared heade
 
 function(rl4phy_add_example _name)
   set(_dir ${CMAKE_CURRENT_SOURCE_DIR}/${_name})
-  set(_main ${CMAKE_CURRENT_SOURCE_DIR}/${_name}_rl4phys.cc)
+  set(_main ${CMAKE_CURRENT_SOURCE_DIR}/${_name}_rl4phy.cc)
 
   if(NOT EXISTS ${_main})
     message(FATAL_ERROR "rl4phy_add_example(${_name}): missing entry point ${_main}")
@@ -46,12 +46,12 @@ function(rl4phy_add_example _name)
   file(GLOB _sources CONFIGURE_DEPENDS ${_dir}/src/*.cc)
   file(GLOB _headers CONFIGURE_DEPENDS ${_dir}/include/*.hh)
 
-  add_executable(${_name}_rl4phys ${_main} ${_sources} ${_headers})
+  add_executable(${_name}_rl4phy ${_main} ${_sources} ${_headers})
   # The example's own headers plus geant4/commons, so every entry point gets the
   # shared gRPC client (GrpcClient.hh) without repeating the path.
-  target_include_directories(${_name}_rl4phys PRIVATE ${_dir}/include ${RL4PHY_COMMONS_DIR})
-  target_link_libraries(${_name}_rl4phys PRIVATE ${Geant4_LIBRARIES})
-  rl4phy_enable_grpc(${_name}_rl4phys)
+  target_include_directories(${_name}_rl4phy PRIVATE ${_dir}/include ${RL4PHY_COMMONS_DIR})
+  target_link_libraries(${_name}_rl4phy PRIVATE ${Geant4_LIBRARIES})
+  rl4phy_enable_grpc(${_name}_rl4phy)
 
   # The example's own macros and reference output, copied to <build>/<name>/ the
   # way the example's own CMakeLists does it - the executables read them from the
