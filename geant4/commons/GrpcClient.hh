@@ -14,18 +14,24 @@
 class GrpcClient {
 public:
   explicit GrpcClient(std::shared_ptr<grpc::Channel> channel)
-      : fStub(rl4phys::SendService::NewStub(std::move(channel))) {}
+      : fStub(rl4phy::SendService::NewStub(std::move(channel))) {}
 
   ~GrpcClient() { CloseStream(); }
 
   GrpcClient(const GrpcClient&) = delete;
   GrpcClient& operator=(const GrpcClient&) = delete;
 
-  void SendEventScoring(float edep_MeV, int event_id) {
-    rl4phys::Data packet;
-    auto* scoring = packet.mutable_event_scoring();
-    scoring->set_edep(edep_MeV);
-    scoring->set_event_id(event_id);
+  void SendB1Event(float edep_MeV, int event_id) {
+    rl4phy::Data packet;
+    auto* b1 = packet.mutable_b1_event();
+    b1->set_edep(edep_MeV);
+    b1->set_event_id(event_id);
+    Send(packet);
+  }
+
+  void SendB1Event(const rl4phy::B1Event& event) {
+    rl4phy::Data packet;
+    *packet.mutable_b1_event() = event;
     Send(packet);
   }
 
@@ -35,7 +41,7 @@ public:
   void SendStepHit(float x, float y, float z,
                    float px, float py, float pz, float e_kin_MeV,
                    int track_id, int event_id, int parent_id, int pdg) {
-    rl4phys::Data packet;
+    rl4phy::Data packet;
     auto* hit = packet.mutable_step_hit();
     hit->set_x(x);
     hit->set_y(y);
@@ -51,8 +57,8 @@ public:
     Send(packet);
   }
 
-  void SendStepHit(const rl4phys::StepHit& hit) {
-    rl4phys::Data packet;
+  void SendStepHit(const rl4phy::StepHit& hit) {
+    rl4phy::Data packet;
     *packet.mutable_step_hit() = hit;
     Send(packet);
   }
@@ -60,9 +66,16 @@ public:
   // One summary per event for the double arm spectrometer (B5). The caller
   // fills the message, since which hit collections make up an event is the
   // example's business, not the transport's.
-  void SendB5Event(const rl4phys::B5Event& event) {
-    rl4phys::Data packet;
+  void SendB5Event(const rl4phy::B5Event& event) {
+    rl4phy::Data packet;
     *packet.mutable_b5_event() = event;
+    Send(packet);
+  }
+
+  // One summary per event Hadr1
+  void SendHadr01Event(const rl4phy::Hadr01Event& event) {
+    rl4phy::Data packet;
+    *packet.mutable_hadr01_event() = event;
     Send(packet);
   }
 
@@ -70,8 +83,8 @@ public:
   // event and not one per step: a trajectory only means anything whole, and the
   // per-step version cost thousands of round trips per event for the same
   // picture.
-  void SendTrajectories(const rl4phys::EventTrajectories& trajectories) {
-    rl4phys::Data packet;
+  void SendTrajectories(const rl4phy::EventTrajectories& trajectories) {
+    rl4phy::Data packet;
     *packet.mutable_event_trajectories() = trajectories;
     Send(packet);
   }
@@ -95,12 +108,12 @@ public:
   // sending for a job. A caller that builds a fresh client per run instead gets
   // a fresh latch with it and would wait thirty seconds every run again, so a
   // run action holds its client for as long as it lives - which is what B5's
-  // GrpcRunAction and MUonE's RunAction do.
+  // RL4PhysRunAction and MUonE's RunAction do.
   bool SendGeometry(const std::string& gdmlContent) {
-    rl4phys::GeometryFile packet;
+    rl4phy::GeometryFile packet;
     packet.set_gdml(gdmlContent);
 
-    rl4phys::Reply reply;
+    rl4phy::Reply reply;
     grpc::ClientContext context;
     context.set_wait_for_ready(!fGeometryFailed);
     context.set_deadline(std::chrono::system_clock::now() +
@@ -137,7 +150,7 @@ private:
   }
 
   // First Send opens the stream; destructor closes it.
-  void Send(const rl4phys::Data& packet) {
+  void Send(const rl4phy::Data& packet) {
     if (!fWriter) OpenStream();
     if (!fWriter->Write(packet) && !fWarned) {
       fWarned = true;
@@ -155,10 +168,10 @@ private:
               << "); further failures suppressed." << std::endl;
   }
 
-  std::unique_ptr<rl4phys::SendService::Stub> fStub;
+  std::unique_ptr<rl4phy::SendService::Stub> fStub;
   grpc::ClientContext fStreamCtx;
-  rl4phys::Reply fStreamReply;
-  std::unique_ptr<grpc::ClientWriter<rl4phys::Data>> fWriter;
+  rl4phy::Reply fStreamReply;
+  std::unique_ptr<grpc::ClientWriter<rl4phy::Data>> fWriter;
   bool fWarned = false;
   bool fGeometryFailed = false;
 };

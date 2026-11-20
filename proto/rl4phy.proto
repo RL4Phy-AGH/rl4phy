@@ -1,9 +1,9 @@
 syntax = "proto3";
 
-package rl4phys;
+package rl4phy;
 
-// B1: energy deposit per event
-message EventScoring
+// B1: energy deposit in the scoring volume, one value per event
+message B1Event
 {
     float edep = 1;
     int32 event_id = 2;
@@ -46,6 +46,19 @@ message B5Event
     repeated float had_cal_edep = 5;
 }
 
+message Hadr01Event
+{
+    int32 event_id = 1;
+    float edep = 2;
+    float edep_em = 3;
+    float edep_pi = 4;
+    float edep_p = 5;
+    int32 n_steps = 6;  // steps inside traget
+    repeated int32 secondary_pdg = 7;
+    repeated int32 leak_pdg = 8;
+    repeated int32 leak_dir = 9;
+}
+
 // One tracked particle, as Geant4's own viewer draws it: the polyline it left
 // behind plus the identity that decides its colour. Built from G4Trajectory, so
 // what arrives here is the same object /vis/scene/add/trajectories renders.
@@ -74,15 +87,16 @@ message EventTrajectories
     repeated Trajectory trajectories = 2;
 }
 
-//Oneof types defined in payload
+// Oneof types defined in payload
 message Data
 {
     oneof payload
     {
-        EventScoring event_scoring = 1;
+        B1Event b1_event = 1;
         StepHit step_hit = 2;
         B5Event b5_event = 3;
         EventTrajectories event_trajectories = 4;
+        Hadr01Event hadr01_event = 5;
     }
 }
 

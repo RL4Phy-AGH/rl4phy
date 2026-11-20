@@ -107,7 +107,7 @@ class GrpcEventAction : public EventAction
       // here, so it has to run before anything is read back below.
       EventAction::EndOfEventAction(event);
 
-      rl4phys::B5Event b5Event;
+      rl4phy::B5Event b5Event;
       b5Event.set_event_id(event->GetEventID());
 
       // One value per arm: chamber 1/2 and hodoscope 1/2.
