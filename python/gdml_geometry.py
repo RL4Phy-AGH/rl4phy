@@ -29,8 +29,10 @@ Three conventions here are easy to get wrong, and B5 exercises all three:
 
 from __future__ import annotations
 
+import functools
 import math
 import re
+import tempfile
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -98,7 +100,7 @@ class PlacedMesh(PlacedSolid):
     """
 
     local_vertices_mm: np.ndarray
-    triangles: np.ndarray
+    vertex_normals: np.ndarray
     solid_type: str
 
 
@@ -111,6 +113,7 @@ class _Walk:
         default_factory=dict
     )
     vertices: int = 0
+    vertex_cap_hit: bool = False
 
 
 def _clean(name: str) -> str:
@@ -178,7 +181,6 @@ def _matrix_to_quaternion_xyzw(m: np.ndarray) -> QuaternionXYZW:
 
 
 def _tessellate(solid, walk: _Walk) -> tuple[np.ndarray, np.ndarray] | None:
-    """Local frame vertices and triangles for any solid pyg4ometry can mesh."""
     if solid.name in walk.meshes:
         return walk.meshes[solid.name]
 
@@ -201,15 +203,17 @@ def _tessellate(solid, walk: _Walk) -> tuple[np.ndarray, np.ndarray] | None:
         walk.meshes[solid.name] = None
         return None
 
-    if walk.vertices + len(vertices) > MAX_MESH_VERTICES:
+    corners = np.asarray(vertices, dtype=np.float32)[np.asarray(triangles)]
+    positions = corners.reshape(-1, 3)
+    if walk.vertices + len(positions) > MAX_MESH_VERTICES:
         walk.meshes[solid.name] = None
+        walk.vertex_cap_hit = True
         return None
-    walk.vertices += len(vertices)
+    walk.vertices += len(positions)
 
-    mesh = (
-        np.array(vertices, dtype=np.float32),
-        np.array(triangles, dtype=np.uint32),
-    )
+    normals = np.cross(corners[:, 1] - corners[:, 0], corners[:, 2] - corners[:, 0])
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True)
+    mesh = (positions, np.repeat(normals, 3, axis=0))
     walk.meshes[solid.name] = mesh
     return mesh
 
@@ -266,12 +270,12 @@ def _make_placed(
     mesh = _tessellate(solid, walk)
     if mesh is None:
         return None
-    local_vertices, triangles = mesh
+    local_vertices, normals = mesh
 
     return PlacedMesh(
         **common,
         local_vertices_mm=local_vertices,
-        triangles=triangles,
+        vertex_normals=normals,
         solid_type=kind,
     )
 
@@ -406,8 +410,16 @@ def parse_gdml(path: str) -> list[PlacedSolid]:
         logger.warning(
             f"Geometry hit the {MAX_SOLIDS} solid cap; the rest is not shown"
         )
-    if walk.vertices >= MAX_MESH_VERTICES:
+    if walk.vertex_cap_hit:
         logger.warning(
             f"Geometry hit the {MAX_MESH_VERTICES} vertex cap; some meshes are missing"
         )
     return walk.solids
+
+
+@functools.lru_cache(maxsize=8)
+def parse_gdml_bytes(content: bytes) -> list[PlacedSolid]:
+    with tempfile.NamedTemporaryFile(suffix=".gdml", delete_on_close=False) as handle:
+        handle.write(content)
+        handle.close()
+        return parse_gdml(handle.name)

@@ -11,3 +11,7 @@ geant4/**/build/
 # a host virtualenv would land on top of the one uv sync builds in the image
 **/.venv/
 **/.ruff_cache/
+
+python/rl4phy_pb2*.py
+**/__pycache__/
+datasets/

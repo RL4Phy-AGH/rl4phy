@@ -1,7 +1,7 @@
 [project]
 name = "rl4phy-python"
 version = "0.1.0"
-description = "gRPC server that turns Geant4 geometry and steps into Rerun recordings"
+description = "gRPC server that records Geant4 layer crossings and draws the geometry and trajectories in Rerun"
 requires-python = ">=3.12"
 dependencies = [
     "grpcio>=1.84.0",
@@ -39,3 +39,7 @@ select = [
 # Generated, not committed, so ruff cannot always find them to classify.
 [tool.ruff.lint.isort]
 known-first-party = ["rl4phy_pb2", "rl4phy_pb2_grpc"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests", "rl4phy_env"]
+pythonpath = ["."]

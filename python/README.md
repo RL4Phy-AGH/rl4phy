@@ -1,8 +1,9 @@
 # Python
 
-The Rerun-facing gRPC server. Dependencies are managed with
-[uv](https://docs.astral.sh/uv/); `uv.lock` is the source of truth and the
-Docker image installs from it, so keep it committed.
+The gRPC server that receives what the Geant4 side sends: it records layer
+crossings to Parquet and draws geometry and trajectories in Rerun. Dependencies
+are managed with [uv](https://docs.astral.sh/uv/); `uv.lock` is the source of
+truth and the Docker image installs from it, so keep it committed.
 
 ## Setup
 
@@ -25,16 +26,34 @@ uv run python -m grpc_tools.protoc -I../proto \
 
 Never edit them by hand.
 
-```sh
-uv run server.py         # run the server
-```
-
 Adding or removing a dependency goes through uv, never by hand:
 
 ```sh
 uv add loguru
 uv remove loguru
 uv add --dev ruff       # dev-only tools
+```
+
+## Running
+
+`docker compose up --build` from the repository root starts the Rerun viewer,
+the server and Geant4. Open the viewer at
+http://localhost:9090?url=rerun%2Bhttp%3A%2F%2Flocalhost%3A9876%2Fproxy.
+
+Nothing is recorded unless `RL4PHY_DATASET_DIR` is set. The Geant4 side does
+not send crossings yet (#45), so for now they come from `test_client.py`:
+
+```sh
+RL4PHY_DATASET_DIR=/datasets docker compose up --build rerun python
+docker compose exec python python test_client.py   # in another terminal
+docker compose exec python python crossings.py /datasets
+docker compose exec python python parquet_to_csv.py /datasets
+```
+
+## Tests
+
+```sh
+uv run pytest
 ```
 
 ## Formatting and linting
@@ -69,8 +88,7 @@ logger.info("server started")
 
 Pick a level that matches the message: `debug`, `info`, `warning`, `error`.
 
-Entry points (`server.py`, `test_client.py`) send the log to stdout; loguru's
-default would be stderr.
+Entry points send the log to stdout; loguru's default would be stderr.
 
 ### Imports at the top
 

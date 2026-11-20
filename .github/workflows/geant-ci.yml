@@ -4,12 +4,14 @@ on:
   pull_request:
     paths:
       - 'geant4/**'
+      - 'proto/**'
       - 'Dockerfile'
       - '.github/workflows/geant-ci.yml'
   push:
     branches: [main]
     paths:
       - 'geant4/**'
+      - 'proto/**'
       - 'Dockerfile'
 
 concurrency:

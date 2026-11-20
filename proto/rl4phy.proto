@@ -9,11 +9,16 @@ message EventScoring
     int32 event_id = 2;
 }
 
-// One step of one track, with the momentum and energy a trajectory point does
-// not carry. No example sends this any more: MUonE and B5 both draw from
-// EventTrajectories below, which is what Geant4's viewer draws and costs one
-// message per event instead of one per step. Kept because it is the only way to
-// get per-step kinematics over the wire, should we ever want them.
+// Total energy and momentum of one particle, MeV.
+message LorentzVector
+{
+    double e = 1;
+    double px = 2;
+    double py = 3;
+    double pz = 4;
+}
+
+// One particle crossing one volume.
 message StepHit
 {
     float x = 1;
@@ -27,6 +32,16 @@ message StepHit
     int32 event_id = 9;
     int32 parent_id = 10;
     int32 pdg = 11;
+    string volume = 12;
+    LorentzVector entry = 13;
+    LorentzVector exit = 14;
+    float path_length = 15;  // mm
+}
+
+message EventStepHits
+{
+    int32 event_id = 1;
+    repeated StepHit hits = 2;
 }
 
 // B5: double arm spectrometer, one event summarised after all hits are collected
@@ -81,6 +96,7 @@ message Data
     {
         EventScoring event_scoring = 1;
         StepHit step_hit = 2;
+        EventStepHits event_step_hits = 6;
         B5Event b5_event = 3;
         EventTrajectories event_trajectories = 4;
     }
