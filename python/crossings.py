@@ -14,19 +14,18 @@ from dataset_writer import CROSSING_SCHEMA, FILE_PREFIX
 
 def crossing_files(source: str) -> list[str]:
     if os.path.isdir(source):
-        paths = glob.glob(os.path.join(source, f"{FILE_PREFIX}-*.parquet"))
-    else:
-        paths = glob.glob(source)
+        source = os.path.join(source, f"{FILE_PREFIX}-*.parquet")
+    paths = sorted(glob.glob(source))
     if not paths:
         raise FileNotFoundError(f"no crossings found at {source}")
-    return sorted(paths)
+    return paths
 
 
 def read_crossing_file(path: str) -> pa.Table:
-    if os.path.splitext(path)[1].lower() == ".csv":
+    if path.lower().endswith(".csv"):
         options = pa_csv.ConvertOptions(column_types=CROSSING_SCHEMA)
         return pa_csv.read_csv(path, convert_options=options)
-    return pq.read_table(path, schema=CROSSING_SCHEMA)
+    return pq.read_table(path)
 
 
 def read_crossings(source: str) -> pa.Table:
@@ -51,31 +50,17 @@ def mass(table: pa.Table) -> np.ndarray:
     return np.sqrt(np.maximum(e**2 - np.sum(p**2, axis=1), 0.0))
 
 
-def theta(table: pa.Table) -> np.ndarray:
+def scattering_angle(table: pa.Table) -> np.ndarray:
     p_in, p_out = _momentum(table, "entry"), _momentum(table, "exit")
     cross = np.linalg.norm(np.cross(p_in, p_out), axis=1)
     dot = np.sum(p_in * p_out, axis=1)
     return np.arctan2(cross, dot)
 
 
-def theta_xy(table: pa.Table) -> tuple[np.ndarray, np.ndarray]:
-    p_in, p_out = _momentum(table, "entry"), _momentum(table, "exit")
-    u = p_in / np.linalg.norm(p_in, axis=1, keepdims=True)
-    seed = np.where(np.abs(u[:, :1]) < 0.9, [[1.0, 0.0, 0.0]], [[0.0, 1.0, 0.0]])
-    e1 = seed - np.sum(seed * u, axis=1, keepdims=True) * u
-    e1 /= np.linalg.norm(e1, axis=1, keepdims=True)
-    e2 = np.cross(u, e1)
-    along = np.sum(p_out * u, axis=1)
-    return (
-        np.arctan2(np.sum(p_out * e1, axis=1), along),
-        np.arctan2(np.sum(p_out * e2, axis=1), along),
-    )
-
-
 def main(source: str) -> None:
     table = read_crossings(source)
     loss = energy_loss(table)
-    angle = theta(table)
+    angle = scattering_angle(table)
     logger.info(f"{table.num_rows} crossing(s) from {source}")
     logger.info(
         f"energy loss: median {np.median(loss):.4f} MeV, "
@@ -88,6 +73,6 @@ def main(source: str) -> None:
 if __name__ == "__main__":
     logger.remove()
     logger.add(sys.stdout)
-    parser = argparse.ArgumentParser()
-    parser.add_argument("source", help="a directory, a file or a glob")
+    parser = argparse.ArgumentParser(description="Summarise recorded crossings.")
+    parser.add_argument("source", help="directory with recordings, a file or a glob")
     main(parser.parse_args().source)

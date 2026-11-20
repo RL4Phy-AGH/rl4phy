@@ -22,17 +22,7 @@ services:
     build:
       context: .
       dockerfile: python/Dockerfile
-    command:
-      - rerun
-      - --serve-web
-      - --bind
-      - 0.0.0.0
-      - --port
-      - "9876"
-      - --web-viewer-port
-      - "9090"
-      - --server-memory-limit
-      - 1GiB
+    command: rerun --serve-web --bind 0.0.0.0 --port 9876 --web-viewer-port 9090 --server-memory-limit 1GiB
     ports:
       - "9090:9090"
       - "9876:9876"
