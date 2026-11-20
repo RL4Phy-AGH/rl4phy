@@ -3,7 +3,7 @@ import pytest
 
 from gdml_geometry import PlacedMesh, parse_gdml_bytes
 
-B1_LIKE = b"""<?xml version="1.0"?>
+CONE_AND_TRD_GDML = b"""<?xml version="1.0"?>
 <gdml>
   <materials>
     <material name="Nothing" Z="1"><D value="1e-25"/><atom value="1.008"/></material>
@@ -40,7 +40,7 @@ B1_LIKE = b"""<?xml version="1.0"?>
 
 @pytest.fixture
 def meshes():
-    return [s for s in parse_gdml_bytes(B1_LIKE) if isinstance(s, PlacedMesh)]
+    return [s for s in parse_gdml_bytes(CONE_AND_TRD_GDML) if isinstance(s, PlacedMesh)]
 
 
 def test_the_shapes_are_meshes(meshes):

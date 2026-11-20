@@ -15,6 +15,7 @@ from rerun_view import RerunView
 
 HOST = "0.0.0.0"
 PORT = 50051
+MAX_WORKERS = 64
 DEFAULT_RERUN_URL = "rerun+http://127.0.0.1:9876/proxy"
 
 
@@ -108,7 +109,7 @@ class SendServicer(rl4phy_pb2_grpc.SendServiceServicer):
 
 
 def serve(crossings_file: ParquetStepWriter | None, view: RerunView) -> None:
-    executor = futures.ThreadPoolExecutor(max_workers=64)
+    executor = futures.ThreadPoolExecutor(max_workers=MAX_WORKERS)
     server = grpc.server(executor)
     rl4phy_pb2_grpc.add_SendServiceServicer_to_server(
         SendServicer(crossings_file, view), server

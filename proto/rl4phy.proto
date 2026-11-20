@@ -21,7 +21,6 @@ message LorentzVector
 // One particle crossing one volume.
 message StepHit
 {
-    // Fields 1 to 7 are the old per-step point; commons/GrpcClient.hh still sets them.
     float x = 1;
     float y = 2;
     float z = 3;
@@ -33,7 +32,7 @@ message StepHit
     int32 event_id = 9;
     int32 parent_id = 10;
     int32 pdg = 11;
-    string volume = 12;  // physical volume name
+    string volume = 12;
     LorentzVector entry = 13;
     LorentzVector exit = 14;
     float path_length = 15;  // mm
